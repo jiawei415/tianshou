@@ -13,7 +13,7 @@ from tianshou.env import DummyVectorEnv
 from tianshou.policy import RainbowPolicy, HyperRainbowPolicy
 from tianshou.trainer import offpolicy_trainer
 from tianshou.utils import TensorboardLogger
-from tianshou.utils.net.common import Net, HyperNet
+from tianshou.utils.net.common import Net, HyperNet, HyperNetWithPrior
 from tianshou.utils.net.discrete import NoisyLinear, NoisyLinearWithPrior, HyperLinear, HyperLinearWithPrior
 
 
@@ -54,6 +54,7 @@ def get_args():
     parser.add_argument('--num-atoms', type=int, default=51)
     parser.add_argument('--v-min', type=float, default=-10.)
     parser.add_argument('--v-max', type=float, default=10.)
+    parser.add_argument('--prior-std', type=float, default=1.)
     parser.add_argument('--noisy-std', type=float, default=0.1)
     parser.add_argument('--noise-std', type=float, default=1.)
     parser.add_argument('--noise-dim', type=int, default=1)
@@ -106,21 +107,24 @@ def test_rainbow(args=get_args()):
     # model
     def last_linear(x, y):
         if args.noise_dim:
-            return HyperLinearWithPrior(x, y, noize_dim=args.noise_dim)
+            if args.prior_std:
+                return HyperLinearWithPrior(x, y, noize_dim=args.noise_dim, prior_std=args.prior_std)
+            else:
+                return HyperLinear(x, y, noize_dim=args.noise_dim)
         else:
-            return NoisyLinearWithPrior(x, y, args.noisy_std)
-        # return NoisyLinear(x, y, args.noisy_std)
-        # return NoisyLinearWithPrior(x, y, args.noisy_std)
-        # return HyperLinear(x, y, noize_dim=args.noise_dim)
-        # return HyperLinearWithPrior(x, y, noize_dim=args.noise_dim)
+            if args.prior_std:
+                return NoisyLinearWithPrior(x, y, args.noisy_std, prior_std=args.prior_std)
+            else:
+                return NoisyLinear(x, y, args.noisy_std)
 
-    model = HyperNet(
+    model = HyperNetWithPrior(
         state_shape=args.state_shape,
         action_shape=args.action_shape,
         hidden_sizes=args.hidden_sizes,
         device=args.device,
         softmax=True,
         num_atoms=args.num_atoms,
+        prior_std=args.prior_std,
         noise_dim=args.noise_dim,
         dueling_param=({
             "linear_layer": last_linear

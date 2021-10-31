@@ -369,7 +369,7 @@ class NoisyLinear(nn.Module):
 
 class NoisyLinearWithPrior(nn.Module):
     def __init__(
-        self, in_features: int, out_features: int, noisy_std: float = 0.5
+        self, in_features: int, out_features: int, noisy_std: float = 0.5, prior_std: float = 1.,
     ) -> None:
         super().__init__()
 
@@ -390,7 +390,7 @@ class NoisyLinearWithPrior(nn.Module):
         self.reset()
         self.sample()
 
-        self.priormodel = LinearPriorNet(in_features, out_features)
+        self.priormodel = LinearPriorNet(in_features, out_features, prior_std=prior_std)
 
     def reset(self) -> None:
         bound = 1 / np.sqrt(self.in_features)
@@ -451,7 +451,7 @@ class HyperLinear(nn.Module):
 
 class HyperLinearWithPrior(nn.Module):
     def __init__(
-        self, in_features: int, out_features: int, noize_dim: int
+        self, in_features: int, out_features: int, noize_dim: int, prior_std: float = 1.,
     ) -> None:
         super().__init__()
 
@@ -459,7 +459,7 @@ class HyperLinearWithPrior(nn.Module):
         inp_dim = noize_dim
         out_dim = in_features * out_features + out_features
         self.hypermodel = nn.Linear(inp_dim, out_dim)
-        self.priormodel = LinearPriorNet(inp_dim, out_dim)
+        self.priormodel = LinearPriorNet(inp_dim, out_dim, prior_std=prior_std)
 
         self.noize_dim = noize_dim
         self.splited_size = [in_features * out_features, out_features]

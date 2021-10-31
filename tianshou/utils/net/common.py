@@ -222,9 +222,9 @@ class HyperNet(Net):
         num_atoms: int = 1,
         dueling_param: Optional[Tuple[Dict[str, Any], Dict[str, Any]]] = None
     ) -> None:
-        super(HyperNet, self).__init__(state_shape, action_shape,
-            hidden_sizes, norm_layer, activation, device, softmax,
-            concat, num_atoms, dueling_param
+        super(HyperNet, self).__init__(
+            state_shape, action_shape, hidden_sizes, norm_layer, activation,
+            device, softmax, concat, num_atoms, dueling_param
     )
         self.noise_dim = noise_dim
 
@@ -255,6 +255,74 @@ class HyperNet(Net):
             return logits, state
         else:
             return super().forward(s, state, info)
+
+
+class HyperNetWithPrior(Net):
+    def __init__(
+        self,
+        state_shape: Union[int, Sequence[int]],
+        action_shape: Union[int, Sequence[int]] = 0,
+        hidden_sizes: Sequence[int] = (),
+        norm_layer: Optional[ModuleType] = None,
+        activation: Optional[ModuleType] = nn.ReLU,
+        device: Union[str, int, torch.device] = "cpu",
+        softmax: bool = False,
+        concat: bool = False,
+        prior_std: float = 1.,
+        noise_dim: int = 1,
+        num_atoms: int = 1,
+        dueling_param: Optional[Tuple[Dict[str, Any], Dict[str, Any]]] = None
+    ) -> None:
+        super(HyperNetWithPrior, self).__init__(
+            state_shape, action_shape, hidden_sizes, norm_layer, activation,
+            device, softmax, concat, num_atoms, dueling_param)
+        self.noise_dim = noise_dim
+        self.prior_std = prior_std
+        if self.prior_std:
+            input_dim = int(np.prod(state_shape))
+            action_dim = int(np.prod(action_shape)) * num_atoms
+            if concat:
+                input_dim += action_dim
+            output_dim = action_dim if not self.use_dueling and not concat else 0
+            self.base_priormodel = MLP(
+                input_dim, output_dim, hidden_sizes, norm_layer, activation, device
+            )
+            for param in self.base_priormodel.parameters():
+                param.requires_grad = False
+
+    def forward(
+        self,
+        s: Union[np.ndarray, torch.Tensor],
+        state: Any = None,
+        info: Dict[str, Any] = {},
+    ) -> Tuple[torch.Tensor, Any]:
+        """Mapping: s -> flatten (inside MLP)-> logits."""
+        if self.noise_dim:
+            noise = s[:, :self.noise_dim]
+            noise = torch.tensor(noise).to(self.device)
+            s = s[:, self.noise_dim:]
+            logits = self.model(s)
+            if self.prior_std:
+                prior_logits = self.base_priormodel(s)
+                logits += prior_logits
+            logits = torch.cat([noise, logits], dim=1)
+        else:
+            logits = self.model(s)
+            if self.prior_std:
+                prior_logits = self.base_priormodel(s)
+                logits += prior_logits
+        bsz = logits.shape[0]
+        if self.use_dueling:  # Dueling DQN
+            q, v = self.Q(logits), self.V(logits)
+            if self.num_atoms > 1:
+                q = q.view(bsz, -1, self.num_atoms)
+                v = v.view(bsz, -1, self.num_atoms)
+            logits = q - q.mean(dim=1, keepdim=True) + v
+        elif self.num_atoms > 1:
+            logits = logits.view(bsz, -1, self.num_atoms)
+        if self.softmax:
+            logits = torch.softmax(logits, dim=-1)
+        return logits, state
 
 
 class Recurrent(nn.Module):

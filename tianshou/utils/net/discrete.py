@@ -423,22 +423,23 @@ class NoisyLinearWithPrior(nn.Module):
 
 class HyperLinear(nn.Module):
     def __init__(
-        self, in_features: int, out_features: int, noize_size: int
+        self, in_features: int, out_features: int, noize_dim: int
     ) -> None:
         super().__init__()
 
         # Learnable parameters.
-        inp_dim = noize_size
+        inp_dim = noize_dim
         out_dim = in_features * out_features + out_features
         self.hypermodel = nn.Linear(inp_dim, out_dim)
 
-        self.noize_size = noize_size
+        self.noize_dim = noize_dim
         self.splited_size = [in_features * out_features, out_features]
         self.weight_shape = (in_features, out_features)
         self.bias_shape = (1, out_features)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        noise = torch.randn([x.shape[0], self.noize_size])
+        noise = x[:, :self.noize_dim]
+        x = x[:, self.noize_dim:]
         params = self.hypermodel(noise)
         weight, bias = params.split(self.splited_size, dim=1)
         weight = weight.reshape((-1,) + self.weight_shape)
@@ -450,17 +451,17 @@ class HyperLinear(nn.Module):
 
 class HyperLinearWithPrior(nn.Module):
     def __init__(
-        self, in_features: int, out_features: int, noize_size: int
+        self, in_features: int, out_features: int, noize_dim: int
     ) -> None:
         super().__init__()
 
         # Learnable parameters.
-        inp_dim = noize_size
+        inp_dim = noize_dim
         out_dim = in_features * out_features + out_features
         self.hypermodel = nn.Linear(inp_dim, out_dim)
         self.priormodel = LinearPriorNet(inp_dim, out_dim)
 
-        self.noize_size = noize_size
+        self.noize_dim = noize_dim
         self.splited_size = [in_features * out_features, out_features]
         self.weight_shape = (in_features, out_features)
         self.bias_shape = (1, out_features)
@@ -474,7 +475,8 @@ class HyperLinearWithPrior(nn.Module):
         return out.squeeze()
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        noise = torch.randn([x.shape[0], self.noize_size])
+        noise = x[:, :self.noize_dim]
+        x = x[:, self.noize_dim:]
         hyper_params = self.hypermodel(noise)
         hyper_out = self.base_forward(x, hyper_params)
         prior_params = self.priormodel(noise)

@@ -10,11 +10,36 @@ from torch.utils.tensorboard import SummaryWriter
 
 from tianshou.data import Collector, PrioritizedVectorReplayBuffer, VectorReplayBuffer
 from tianshou.env import DummyVectorEnv
-from tianshou.policy import RainbowPolicy
+from tianshou.policy import RainbowPolicy, HyperRainbowPolicy
 from tianshou.trainer import offpolicy_trainer
 from tianshou.utils import TensorboardLogger
-from tianshou.utils.net.common import Net
+from tianshou.utils.net.common import Net, HyperNet
 from tianshou.utils.net.discrete import NoisyLinear, NoisyLinearWithPrior, HyperLinear, HyperLinearWithPrior
+
+
+class NoiseWrapper(gym.Wrapper):
+    def __init__(self, env, noise_dim, noise_std=1.):
+        super().__init__(env)
+        assert noise_dim > 0
+        self.env = env
+        self.noise_dim = noise_dim
+        self.noise_std = noise_std
+
+    def reset(self):
+        state = self.env.reset()
+        self.now_noise = np.random.normal(0, 1, self.noise_dim) * self.noise_std
+        return np.hstack([self.now_noise, state])
+
+    def step(self, action):
+        state, reward, done, info = self.env.step(action)
+        return np.hstack([self.now_noise, state]), reward, done, info
+
+
+def make_env(env_name, noise_dim=0):
+    env = gym.make(env_name)
+    if noise_dim:
+        env = NoiseWrapper(env, noise_dim=noise_dim)
+    return env
 
 
 def get_args():
@@ -30,7 +55,8 @@ def get_args():
     parser.add_argument('--v-min', type=float, default=-10.)
     parser.add_argument('--v-max', type=float, default=10.)
     parser.add_argument('--noisy-std', type=float, default=0.1)
-    parser.add_argument('--noise-dim', type=float, default=2)
+    parser.add_argument('--noise-std', type=float, default=1.)
+    parser.add_argument('--noise-dim', type=int, default=1)
     parser.add_argument('--n-step', type=int, default=3)
     parser.add_argument('--target-update-freq', type=int, default=320)
     parser.add_argument('--epoch', type=int, default=10)
@@ -59,17 +85,17 @@ def get_args():
 
 
 def test_rainbow(args=get_args()):
-    env = gym.make(args.task)
+    env = make_env(args.task, noise_dim=args.noise_dim)
     args.state_shape = env.observation_space.shape or env.observation_space.n
     args.action_shape = env.action_space.shape or env.action_space.n
     # train_envs = gym.make(args.task)
     # you can also use tianshou.env.SubprocVectorEnv
     train_envs = DummyVectorEnv(
-        [lambda: gym.make(args.task) for _ in range(args.training_num)]
+        [lambda: make_env(args.task, noise_dim=args.noise_dim) for _ in range(args.training_num)]
     )
     # test_envs = gym.make(args.task)
     test_envs = DummyVectorEnv(
-        [lambda: gym.make(args.task) for _ in range(args.test_num)]
+        [lambda: make_env(args.task, noise_dim=args.noise_dim) for _ in range(args.test_num)]
     )
     # seed
     np.random.seed(args.seed)
@@ -78,37 +104,58 @@ def test_rainbow(args=get_args()):
     test_envs.seed(args.seed)
 
     # model
-
-    def noisy_linear(x, y):
+    def last_linear(x, y):
+        if args.noise_dim:
+            return HyperLinearWithPrior(x, y, noize_dim=args.noise_dim)
+        else:
+            return NoisyLinearWithPrior(x, y, args.noisy_std)
         # return NoisyLinear(x, y, args.noisy_std)
-        return NoisyLinearWithPrior(x, y, args.noisy_std)
-        # return HyperLinear(x, y, noize_size=args.noise_dim)
-        # return HyperLinearWithPrior(x, y, noize_size=args.noise_dim)
+        # return NoisyLinearWithPrior(x, y, args.noisy_std)
+        # return HyperLinear(x, y, noize_dim=args.noise_dim)
+        # return HyperLinearWithPrior(x, y, noize_dim=args.noise_dim)
 
-    net = Net(
-        args.state_shape,
-        args.action_shape,
+    model = HyperNet(
+        state_shape=args.state_shape,
+        action_shape=args.action_shape,
         hidden_sizes=args.hidden_sizes,
         device=args.device,
         softmax=True,
         num_atoms=args.num_atoms,
+        noise_dim=args.noise_dim,
         dueling_param=({
-            "linear_layer": noisy_linear
+            "linear_layer": last_linear
         }, {
-            "linear_layer": noisy_linear
+            "linear_layer": last_linear
         })
     )
-    optim = torch.optim.Adam(net.parameters(), lr=args.lr)
-    policy = RainbowPolicy(
-        net,
-        optim,
-        args.gamma,
-        args.num_atoms,
-        args.v_min,
-        args.v_max,
-        args.n_step,
-        target_update_freq=args.target_update_freq
-    ).to(args.device)
+    print(f"Network structure:\n{str(model)}")
+
+    trainable_params = [
+            {'params': (p for name, p in model.named_parameters() if 'priormodel' not in name)},
+        ]
+    optim = torch.optim.Adam(trainable_params, lr=args.lr)
+
+    policy_params = {
+        "model": model,
+        "optim": optim,
+        "discount_factor": args.gamma,
+        "num_atoms": args.num_atoms,
+        "v_min": args.v_min,
+        "v_max": args.v_max,
+        "estimation_step": args.n_step,
+        "target_update_freq": args.target_update_freq
+    }
+    if args.noise_dim:
+        policy_params.update(
+            {
+                "noise_std": args.noise_std,
+                "noise_dim": args.noise_dim,
+            }
+        )
+        policy = HyperRainbowPolicy(**policy_params).to(args.device)
+    else:
+        policy = RainbowPolicy(**policy_params).to(args.device)
+
     # buffer
     if args.prioritized_replay:
         buf = PrioritizedVectorReplayBuffer(
@@ -215,7 +262,7 @@ def test_rainbow(args=get_args()):
     if __name__ == '__main__':
         pprint.pprint(result)
         # Let's watch its performance!
-        env = gym.make(args.task)
+        env = make_env(args.task, noise_dim=args.noise_dim)
         policy.eval()
         policy.set_eps(args.eps_test)
         collector = Collector(policy, env)

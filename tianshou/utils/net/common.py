@@ -207,6 +207,56 @@ class Net(nn.Module):
         return logits, state
 
 
+class HyperNet(Net):
+    def __init__(
+        self,
+        state_shape: Union[int, Sequence[int]],
+        action_shape: Union[int, Sequence[int]] = 0,
+        hidden_sizes: Sequence[int] = (),
+        norm_layer: Optional[ModuleType] = None,
+        activation: Optional[ModuleType] = nn.ReLU,
+        device: Union[str, int, torch.device] = "cpu",
+        softmax: bool = False,
+        concat: bool = False,
+        noise_dim: int = 1,
+        num_atoms: int = 1,
+        dueling_param: Optional[Tuple[Dict[str, Any], Dict[str, Any]]] = None
+    ) -> None:
+        super(HyperNet, self).__init__(state_shape, action_shape,
+            hidden_sizes, norm_layer, activation, device, softmax,
+            concat, num_atoms, dueling_param
+    )
+        self.noise_dim = noise_dim
+
+    def forward(
+        self,
+        s: Union[np.ndarray, torch.Tensor],
+        state: Any = None,
+        info: Dict[str, Any] = {},
+    ) -> Tuple[torch.Tensor, Any]:
+        """Mapping: s -> flatten (inside MLP)-> logits."""
+        if self.noise_dim:
+            noise = s[:, :self.noise_dim]
+            noise = torch.tensor(noise).to(self.device)
+            s = s[:, self.noise_dim:]
+            logits = self.model(s)
+            logits = torch.cat([noise, logits], dim=1)
+            bsz = logits.shape[0]
+            if self.use_dueling:  # Dueling DQN
+                q, v = self.Q(logits), self.V(logits)
+                if self.num_atoms > 1:
+                    q = q.view(bsz, -1, self.num_atoms)
+                    v = v.view(bsz, -1, self.num_atoms)
+                logits = q - q.mean(dim=1, keepdim=True) + v
+            elif self.num_atoms > 1:
+                logits = logits.view(bsz, -1, self.num_atoms)
+            if self.softmax:
+                logits = torch.softmax(logits, dim=-1)
+            return logits, state
+        else:
+            return super().forward(s, state, info)
+
+
 class Recurrent(nn.Module):
     """Simple Recurrent network based on LSTM.
 

@@ -232,6 +232,7 @@ class BasePolicy(ABC, nn.Module):
         :return: A dict, including the data needed to be logged (e.g., loss) from
             ``policy.learn()``.
         """
+        kwargs.update({"sample_num": len(buffer)})
         if buffer is None:
             return {}
         batch, indices = buffer.sample(sample_size)

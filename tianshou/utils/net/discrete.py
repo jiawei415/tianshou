@@ -448,6 +448,12 @@ class HyperLinear(nn.Module):
         out = torch.bmm(x, weight) + bias
         return out.squeeze()
 
+    def regularization(self, x: torch.Tensor, p: int = 2) -> torch.Tensor:
+        noise = x[:, :self.noize_dim]
+        hyper_params = self.hypermodel(noise)
+        reg_loss = torch.norm(hyper_params, dim=1, p=p).square()
+        return reg_loss.mean()
+
 
 class HyperLinearWithPrior(nn.Module):
     def __init__(
@@ -483,6 +489,12 @@ class HyperLinearWithPrior(nn.Module):
         prior_out = self.base_forward(x, prior_params)
         out = hyper_out + prior_out
         return out
+
+    def regularization(self, x: torch.Tensor, p: int = 2) -> torch.Tensor:
+        noise = x[:, :self.noize_dim]
+        hyper_params = self.hypermodel(noise)
+        reg_loss = torch.norm(hyper_params, dim=1, p=p).square()
+        return reg_loss.mean()
 
 
 class LinearPriorNet(torch.nn.Module):

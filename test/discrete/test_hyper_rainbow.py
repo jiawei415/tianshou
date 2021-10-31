@@ -13,7 +13,7 @@ from tianshou.env import DummyVectorEnv
 from tianshou.policy import RainbowPolicy, HyperRainbowPolicy
 from tianshou.trainer import offpolicy_trainer
 from tianshou.utils import TensorboardLogger
-from tianshou.utils.net.common import Net, HyperNet, HyperNetWithPrior
+from tianshou.utils.net.common import Net, HyperNetWithPrior
 from tianshou.utils.net.discrete import NoisyLinear, NoisyLinearWithPrior, HyperLinear, HyperLinearWithPrior
 
 
@@ -50,14 +50,17 @@ def get_args():
     parser.add_argument('--eps-train', type=float, default=0.1)
     parser.add_argument('--buffer-size', type=int, default=20000)
     parser.add_argument('--lr', type=float, default=1e-3)
+    parser.add_argument('--hyper-reg-coef', type=float, default=0.01)
+    parser.add_argument('--hyper-weight-decay', type=float, default=1e-4)
+    parser.add_argument('--base-weight-decay', type=float, default=1e-4)
     parser.add_argument('--gamma', type=float, default=0.9)
     parser.add_argument('--num-atoms', type=int, default=51)
     parser.add_argument('--v-min', type=float, default=-10.)
     parser.add_argument('--v-max', type=float, default=10.)
-    parser.add_argument('--prior-std', type=float, default=1.)
-    parser.add_argument('--noisy-std', type=float, default=0.1)
+    parser.add_argument('--prior-std', type=float, default=2.)
     parser.add_argument('--noise-std', type=float, default=1.)
-    parser.add_argument('--noise-dim', type=int, default=1)
+    parser.add_argument('--noise-dim', type=int, default=2)
+    parser.add_argument('--noisy-std', type=float, default=0.1)
     parser.add_argument('--n-step', type=int, default=3)
     parser.add_argument('--target-update-freq', type=int, default=320)
     parser.add_argument('--epoch', type=int, default=10)
@@ -113,29 +116,36 @@ def test_rainbow(args=get_args()):
                 return HyperLinear(x, y, noize_dim=args.noise_dim)
         else:
             if args.prior_std:
-                return NoisyLinearWithPrior(x, y, args.noisy_std, prior_std=args.prior_std)
+                return NoisyLinearWithPrior(x, y, noisy_std=args.noisy_std, prior_std=args.prior_std)
             else:
-                return NoisyLinear(x, y, args.noisy_std)
+                return NoisyLinear(x, y, noisy_std=args.noisy_std)
 
-    model = HyperNetWithPrior(
-        state_shape=args.state_shape,
-        action_shape=args.action_shape,
-        hidden_sizes=args.hidden_sizes,
-        device=args.device,
-        softmax=True,
-        num_atoms=args.num_atoms,
-        prior_std=args.prior_std,
-        noise_dim=args.noise_dim,
-        dueling_param=({
-            "linear_layer": last_linear
-        }, {
-            "linear_layer": last_linear
-        })
-    )
+    model_params = {
+        "state_shape": args.state_shape,
+        "action_shape": args.action_shape,
+        "hidden_sizes": args.hidden_sizes,
+        "device": args.device,
+        "softmax": True,
+        "num_atoms": args.num_atoms,
+        "dueling_param": ({ "linear_layer": last_linear}, {"linear_layer": last_linear})
+    }
+    if args.noise_dim:
+        model_params.update(
+            {
+                "prior_std": args.prior_std,
+                "noise_dim": args.noise_dim,
+            }
+        )
+        model = HyperNetWithPrior(**model_params)
+    else:
+        model = Net(**model_params)
     print(f"Network structure:\n{str(model)}")
 
+    if args.hyper_reg_coef:
+        args.hyper_weight_decay = 0
     trainable_params = [
-            {'params': (p for name, p in model.named_parameters() if 'priormodel' not in name)},
+            {'params': (p for name, p in model.named_parameters() if 'priormodel' not in name and 'hypermodel' not in name),'weight_decay': args.base_weight_decay},
+            {'params': (p for name, p in model.named_parameters() if 'priormodel' not in name and 'hypermodel' in name), 'weight_decay': args.hyper_weight_decay},
         ]
     optim = torch.optim.Adam(trainable_params, lr=args.lr)
 
@@ -150,10 +160,13 @@ def test_rainbow(args=get_args()):
         "target_update_freq": args.target_update_freq
     }
     if args.noise_dim:
+        if args.prior_std:
+            args.hyper_reg_coef /= args.prior_std ** 2
         policy_params.update(
             {
                 "noise_std": args.noise_std,
                 "noise_dim": args.noise_dim,
+                "hyper_reg_coef": args.hyper_reg_coef,
             }
         )
         policy = HyperRainbowPolicy(**policy_params).to(args.device)

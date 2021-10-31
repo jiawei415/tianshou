@@ -97,6 +97,38 @@ class MLP(nn.Module):
         return self.model(s.flatten(1))  # type: ignore
 
 
+class HyperMLP(nn.Module):
+    def __init__(
+        self,
+        input_dim: int,
+        output_dim: int = 0,
+        device: Optional[Union[str, int, torch.device]] = None,
+        linear_layer: Type[nn.Linear] = nn.Linear,
+    ) -> None:
+        super().__init__()
+        self.device = device
+        self.output_dim = output_dim
+        self.model = linear_layer(input_dim, output_dim)
+
+    def forward(self, s: Union[np.ndarray, torch.Tensor]) -> torch.Tensor:
+        if self.device is not None:
+            s = torch.as_tensor(
+                s,
+                device=self.device,  # type: ignore
+                dtype=torch.float32,
+            )
+        return self.model(s.flatten(1))  # type: ignore
+
+    def regularization(self, s: Union[np.ndarray, torch.Tensor]) -> torch.Tensor:
+        if self.device is not None:
+            s = torch.as_tensor(
+                s,
+                device=self.device,  # type: ignore
+                dtype=torch.float32,
+            )
+        return self.model.regularization(s.flatten(1))
+
+
 class Net(nn.Module):
     """Wrapper of MLP to support more specific DRL usage.
 
@@ -207,7 +239,7 @@ class Net(nn.Module):
         return logits, state
 
 
-class HyperNet(Net):
+class HyperNet(nn.Module):
     def __init__(
         self,
         state_shape: Union[int, Sequence[int]],
@@ -222,11 +254,38 @@ class HyperNet(Net):
         num_atoms: int = 1,
         dueling_param: Optional[Tuple[Dict[str, Any], Dict[str, Any]]] = None
     ) -> None:
-        super(HyperNet, self).__init__(
-            state_shape, action_shape, hidden_sizes, norm_layer, activation,
-            device, softmax, concat, num_atoms, dueling_param
-    )
+        super().__init__()
+        self.device = device
+        self.softmax = softmax
+        self.num_atoms = num_atoms
         self.noise_dim = noise_dim
+        input_dim = int(np.prod(state_shape))
+        action_dim = int(np.prod(action_shape)) * num_atoms
+        if concat:
+            input_dim += action_dim
+        self.use_dueling = dueling_param is not None
+        output_dim = action_dim if not self.use_dueling and not concat else 0
+        self.model = MLP(
+            input_dim, output_dim, hidden_sizes, norm_layer, activation, device
+        )
+        self.output_dim = self.model.output_dim
+        if self.use_dueling:  # dueling DQN
+            q_kwargs, v_kwargs = dueling_param  # type: ignore
+            q_output_dim, v_output_dim = 0, 0
+            if not concat:
+                q_output_dim, v_output_dim = action_dim, num_atoms
+            q_kwargs: Dict[str, Any] = {
+                **q_kwargs, "input_dim": self.output_dim,
+                "output_dim": q_output_dim,
+                "device": self.device
+            }
+            v_kwargs: Dict[str, Any] = {
+                **v_kwargs, "input_dim": self.output_dim,
+                "output_dim": v_output_dim,
+                "device": self.device
+            }
+            self.Q, self.V = HyperMLP(**q_kwargs), HyperMLP(**v_kwargs)
+            self.output_dim = self.Q.output_dim
 
     def forward(
         self,
@@ -235,29 +294,26 @@ class HyperNet(Net):
         info: Dict[str, Any] = {},
     ) -> Tuple[torch.Tensor, Any]:
         """Mapping: s -> flatten (inside MLP)-> logits."""
-        if self.noise_dim:
-            noise = s[:, :self.noise_dim]
-            noise = torch.tensor(noise).to(self.device)
-            s = s[:, self.noise_dim:]
-            logits = self.model(s)
-            logits = torch.cat([noise, logits], dim=1)
-            bsz = logits.shape[0]
-            if self.use_dueling:  # Dueling DQN
-                q, v = self.Q(logits), self.V(logits)
-                if self.num_atoms > 1:
-                    q = q.view(bsz, -1, self.num_atoms)
-                    v = v.view(bsz, -1, self.num_atoms)
-                logits = q - q.mean(dim=1, keepdim=True) + v
-            elif self.num_atoms > 1:
-                logits = logits.view(bsz, -1, self.num_atoms)
-            if self.softmax:
-                logits = torch.softmax(logits, dim=-1)
-            return logits, state
-        else:
-            return super().forward(s, state, info)
+        noise = s[:, :self.noise_dim]
+        noise = torch.tensor(noise).to(self.device)
+        s = s[:, self.noise_dim:]
+        logits = self.model(s)
+        logits = torch.cat([noise, logits], dim=1)
+        bsz = logits.shape[0]
+        if self.use_dueling:  # Dueling DQN
+            q, v = self.Q(logits), self.V(logits)
+            if self.num_atoms > 1:
+                q = q.view(bsz, -1, self.num_atoms)
+                v = v.view(bsz, -1, self.num_atoms)
+            logits = q - q.mean(dim=1, keepdim=True) + v
+        elif self.num_atoms > 1:
+            logits = logits.view(bsz, -1, self.num_atoms)
+        if self.softmax:
+            logits = torch.softmax(logits, dim=-1)
+        return logits, state
 
 
-class HyperNetWithPrior(Net):
+class HyperNetWithPrior(nn.Module):
     def __init__(
         self,
         state_shape: Union[int, Sequence[int]],
@@ -273,22 +329,45 @@ class HyperNetWithPrior(Net):
         num_atoms: int = 1,
         dueling_param: Optional[Tuple[Dict[str, Any], Dict[str, Any]]] = None
     ) -> None:
-        super(HyperNetWithPrior, self).__init__(
-            state_shape, action_shape, hidden_sizes, norm_layer, activation,
-            device, softmax, concat, num_atoms, dueling_param)
+        super().__init__()
+        self.device = device
+        self.softmax = softmax
+        self.num_atoms = num_atoms
         self.noise_dim = noise_dim
         self.prior_std = prior_std
+        input_dim = int(np.prod(state_shape))
+        action_dim = int(np.prod(action_shape)) * num_atoms
+        if concat:
+            input_dim += action_dim
+        self.use_dueling = dueling_param is not None
+        output_dim = action_dim if not self.use_dueling and not concat else 0
+        self.model = MLP(
+            input_dim, output_dim, hidden_sizes, norm_layer, activation, device
+        )
         if self.prior_std:
-            input_dim = int(np.prod(state_shape))
-            action_dim = int(np.prod(action_shape)) * num_atoms
-            if concat:
-                input_dim += action_dim
-            output_dim = action_dim if not self.use_dueling and not concat else 0
             self.base_priormodel = MLP(
                 input_dim, output_dim, hidden_sizes, norm_layer, activation, device
             )
             for param in self.base_priormodel.parameters():
                 param.requires_grad = False
+        self.output_dim = self.model.output_dim
+        if self.use_dueling:  # dueling DQN
+            q_kwargs, v_kwargs = dueling_param  # type: ignore
+            q_output_dim, v_output_dim = 0, 0
+            if not concat:
+                q_output_dim, v_output_dim = action_dim, num_atoms
+            q_kwargs: Dict[str, Any] = {
+                **q_kwargs, "input_dim": self.output_dim,
+                "output_dim": q_output_dim,
+                "device": self.device
+            }
+            v_kwargs: Dict[str, Any] = {
+                **v_kwargs, "input_dim": self.output_dim,
+                "output_dim": v_output_dim,
+                "device": self.device
+            }
+            self.Q, self.V = HyperMLP(**q_kwargs), HyperMLP(**v_kwargs)
+            self.output_dim = self.Q.output_dim
 
     def forward(
         self,
@@ -297,20 +376,14 @@ class HyperNetWithPrior(Net):
         info: Dict[str, Any] = {},
     ) -> Tuple[torch.Tensor, Any]:
         """Mapping: s -> flatten (inside MLP)-> logits."""
-        if self.noise_dim:
-            noise = s[:, :self.noise_dim]
-            noise = torch.tensor(noise).to(self.device)
-            s = s[:, self.noise_dim:]
-            logits = self.model(s)
-            if self.prior_std:
-                prior_logits = self.base_priormodel(s)
-                logits += prior_logits
-            logits = torch.cat([noise, logits], dim=1)
-        else:
-            logits = self.model(s)
-            if self.prior_std:
-                prior_logits = self.base_priormodel(s)
-                logits += prior_logits
+        noise = s[:, :self.noise_dim]
+        noise = torch.tensor(noise).to(self.device)
+        s = s[:, self.noise_dim:]
+        logits = self.model(s)
+        if self.prior_std:
+            prior_logits = self.base_priormodel(s)
+            logits += prior_logits
+        logits = torch.cat([noise, logits], dim=1)
         bsz = logits.shape[0]
         if self.use_dueling:  # Dueling DQN
             q, v = self.Q(logits), self.V(logits)

@@ -3,7 +3,7 @@ import numpy as np
 from typing import Any, Dict
 
 from tianshou.data import Batch
-from tianshou.policy import C51Policy
+from tianshou.policy import C51Policy, HyperC51Policy
 from tianshou.utils.net.discrete import sample_noise
 
 
@@ -39,7 +39,7 @@ class RainbowPolicy(C51Policy):
         return super().learn(batch, **kwargs)
 
 
-class HyperRainbowPolicy(C51Policy):
+class HyperRainbowPolicy(HyperC51Policy):
     def __init__(
         self,
         model: torch.nn.Module,
@@ -50,13 +50,14 @@ class HyperRainbowPolicy(C51Policy):
         num_atoms: int = 51,
         v_min: float = -10,
         v_max: float = 10,
+        hyper_reg_coef: float = 0.1,
         estimation_step: int = 1,
         target_update_freq: int = 0,
         reward_normalization: bool = False,
         **kwargs: Any
     ) -> None:
         super(HyperRainbowPolicy, self).__init__(
-            model, optim, discount_factor, num_atoms, v_min, v_max,
+            model, optim, discount_factor, num_atoms, v_min, v_max, hyper_reg_coef,
             estimation_step, target_update_freq, reward_normalization, **kwargs
         )
         self.noise_dim = noise_dim

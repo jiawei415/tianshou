@@ -88,6 +88,8 @@ def get_args():
         '--device', type=str, default='cuda' if torch.cuda.is_available() else 'cpu'
     )
     parser.add_argument("--save-interval", type=int, default=4)
+    parser.add_argument('--config', type=str, default="{}",
+                        help="game config eg., {'seed':2021,'noise_dim':2,'prior_std':2,'hyper_reg_coef':0.01,}")
     args = parser.parse_known_args()[0]
     return args
 
@@ -224,6 +226,7 @@ def test_rainbow(args=get_args()):
     logger = TensorboardLogger(writer, save_interval=args.save_interval)
     with open(os.path.join(log_path, "config.json"), "wt") as f:
         kvs = vars(args)
+        kvs.pop('config')
         f.write(json.dumps(kvs, indent=4) + '\n')
         f.flush()
         f.close()
@@ -351,5 +354,12 @@ def train_hyperrainbow(args=get_args()):
 
 
 if __name__ == '__main__':
-    test_rainbow()
+    args = get_args()
+    config = eval(args.config)
+    for k, v in config.items():
+        if k not in args.__dict__.keys():
+            print(f'unrecognized config k: {k}, v: {v}, ignored')
+            continue
+        args.__dict__[k] = v
+    test_rainbow(args)
     # test_hyperrainbow()

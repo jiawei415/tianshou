@@ -450,8 +450,8 @@ class HyperLinear(nn.Module):
 
     def regularization(self, x: torch.Tensor, p: int = 2) -> torch.Tensor:
         noise = x[:, :self.noize_dim]
-        hyper_params = self.hypermodel(noise)
-        reg_loss = torch.norm(hyper_params, dim=1, p=p).square()
+        params = self.hypermodel(noise)
+        reg_loss = torch.norm(params, dim=1, p=p).square()
         return reg_loss.mean()
 
 
@@ -492,8 +492,8 @@ class HyperLinearWithPrior(nn.Module):
 
     def regularization(self, x: torch.Tensor, p: int = 2) -> torch.Tensor:
         noise = x[:, :self.noize_dim]
-        hyper_params = self.hypermodel(noise)
-        reg_loss = torch.norm(hyper_params, dim=1, p=p).square()
+        params = self.hypermodel(noise)
+        reg_loss = torch.norm(params, dim=1, p=p).square()
         return reg_loss.mean()
 
 

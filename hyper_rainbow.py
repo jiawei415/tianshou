@@ -221,7 +221,7 @@ def test_rainbow(args=get_args()):
 
     # log
     log_name = f"{args.task[:-3].lower()}_{args.seed}_{time.strftime('%Y%m%d%H%M%S', time.localtime())}"
-    log_path = os.path.join(args.logdir, "hypermodel", args.task, log_name)
+    log_path = os.path.join(os.path.dirname(os.path.realpath(__file__)), args.logdir, "hypermodel", args.task, log_name)
     writer = SummaryWriter(log_path)
     logger = TensorboardLogger(writer, save_interval=args.save_interval)
     with open(os.path.join(log_path, "config.json"), "wt") as f:

@@ -1,4 +1,5 @@
 import warnings
+import os
 from typing import Any, Callable, Optional, Tuple
 
 from tensorboard.backend.event_processing import event_accumulator
@@ -31,8 +32,15 @@ class TensorboardLogger(BaseLogger):
         self.save_interval = save_interval
         self.last_save_step = -1
         self.writer = writer
+        logdir = self.writer.log_dir
+        self.train_csv = CSVOutputFormat(os.path.join(logdir, "train.csv"))
+        self.test_csv = CSVOutputFormat(os.path.join(logdir, "test.csv"))
 
     def write(self, step_type: str, step: int, data: LOG_DATA_TYPE) -> None:
+        if "test" in step_type:
+            self.test_csv.writekvs(data)
+        if "train" in step_type:
+            self.train_csv.writekvs(data)
         for k, v in data.items():
             self.writer.add_scalar(k, v, global_step=step)
 
@@ -84,3 +92,40 @@ class BasicLogger(TensorboardLogger):
             "Deprecated soon: BasicLogger has renamed to TensorboardLogger in #427."
         )
         super().__init__(*args, **kwargs)
+
+
+class CSVOutputFormat:
+    def __init__(self, filename):
+        self.file = open(filename, 'w+t')
+        self.keys = []
+        self.sep = '\t'
+
+    def writekvs(self, kvs):
+        # Add our current row to the history
+        extra_keys = list(kvs.keys() - self.keys)
+        extra_keys.sort()
+        if extra_keys:
+            self.keys.extend(extra_keys)
+            self.file.seek(0)
+            lines = self.file.readlines()
+            self.file.seek(0)
+            for (i, k) in enumerate(self.keys):
+                if i > 0:
+                    self.file.write('\t')
+                self.file.write(k)
+            self.file.write('\n')
+            for line in lines[1:]:
+                self.file.write(line[:-1])
+                self.file.write(self.sep * len(extra_keys))
+                self.file.write('\n')
+        for (i, k) in enumerate(self.keys):
+            if i > 0:
+                self.file.write('\t')
+            v = kvs.get(k)
+            if v is not None:
+                self.file.write(str(v))
+        self.file.write('\n')
+        self.file.flush()
+
+    def close(self):
+        self.file.close()

@@ -39,6 +39,7 @@ class NoiseWrapper(gym.Wrapper):
 
 def make_env(env_name, noise_dim=0):
     env = gym.make(env_name)
+    env._max_episode_steps = 500
     if noise_dim:
         env = NoiseWrapper(env, noise_dim=noise_dim)
     return env
@@ -46,16 +47,16 @@ def make_env(env_name, noise_dim=0):
 
 def get_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--task', type=str, default='CartPole-v0')
+    parser.add_argument('--task', type=str, default='Acrobot-v1')
     parser.add_argument('--seed', type=int, default=2021)
     parser.add_argument('--eps-test', type=float, default=0.05)
     parser.add_argument('--eps-train', type=float, default=0.1)
-    parser.add_argument('--buffer-size', type=int, default=20000)
-    parser.add_argument('--lr', type=float, default=1e-3)
+    parser.add_argument('--buffer-size', type=int, default=1e-6)
+    parser.add_argument('--lr', type=float, default=1e-4)
     parser.add_argument('--hyper-reg-coef', type=float, default=0.01)
     parser.add_argument('--hyper-weight-decay', type=float, default=1e-4)
     parser.add_argument('--base-weight-decay', type=float, default=1e-4)
-    parser.add_argument('--gamma', type=float, default=0.9)
+    parser.add_argument('--gamma', type=float, default=0.99)
     parser.add_argument('--num-atoms', type=int, default=51)
     parser.add_argument('--v-min', type=float, default=-10.)
     parser.add_argument('--v-max', type=float, default=10.)
@@ -65,7 +66,7 @@ def get_args():
     parser.add_argument('--noisy-std', type=float, default=0.1)
     parser.add_argument('--n-step', type=int, default=3)
     parser.add_argument('--target-update-freq', type=int, default=320)
-    parser.add_argument('--epoch', type=int, default=10)
+    parser.add_argument('--epoch', type=int, default=10000)
     parser.add_argument('--step-per-epoch', type=int, default=8000)
     parser.add_argument('--step-per-collect', type=int, default=8)
     parser.add_argument('--update-per-step', type=float, default=0.125)
@@ -73,7 +74,7 @@ def get_args():
     parser.add_argument('--hidden-sizes', type=int, nargs='*', default=[128, 128])
     parser.add_argument('--training-num', type=int, default=8)
     parser.add_argument('--test-num', type=int, default=100)
-    parser.add_argument('--logdir', type=str, default='log')
+    parser.add_argument('--logdir', type=str, default='results')
     parser.add_argument('--render', type=float, default=0.)
     parser.add_argument('--prioritized-replay', action="store_true", default=True)
     parser.add_argument('--alpha', type=float, default=0.6)

@@ -170,12 +170,12 @@ def test_rainbow(args=get_args()):
     }
     if args.noise_dim:
         if args.prior_std:
-            args.hyper_reg_coef /= args.prior_std ** 2
+            hyper_reg_coef = args.hyper_reg_coef / (args.prior_std ** 2)
         policy_params.update(
             {
                 "noise_std": args.noise_std,
                 "noise_dim": args.noise_dim,
-                "hyper_reg_coef": args.hyper_reg_coef,
+                "hyper_reg_coef": hyper_reg_coef,
             }
         )
         policy = HyperRainbowPolicy(**policy_params).to(args.device)

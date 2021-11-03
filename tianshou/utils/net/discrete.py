@@ -366,6 +366,11 @@ class NoisyLinear(nn.Module):
 
         return F.linear(x, weight, bias)
 
+    def extra_repr(self):
+        return 'in_features={}, out_features={}, bias={}'.format(
+            self.in_features, self.out_features, not np.all(self.mu_bias.detach().numpy() == 0)
+        )
+
 
 class NoisyLinearWithPrior(nn.Module):
     def __init__(
@@ -390,7 +395,7 @@ class NoisyLinearWithPrior(nn.Module):
         self.reset()
         self.sample()
 
-        self.priormodel = LinearPriorNet(in_features, out_features, prior_std=prior_std)
+        self.priormodel = LinearPriorNet(in_features, in_features, prior_std=prior_std)
 
     def reset(self) -> None:
         bound = 1 / np.sqrt(self.in_features)
@@ -417,8 +422,14 @@ class NoisyLinearWithPrior(nn.Module):
             weight = self.mu_W
             bias = self.mu_bias
         out =  F.linear(x, weight, bias)
-        prior_out = self.priormodel(x)
+        prior_weight = self.priormodel(self.eps_q.ger(self.eps_p))
+        prior_out = F.linear(x, prior_weight)
         return out + prior_out
+
+    def extra_repr(self):
+        return 'in_features={}, out_features={}, bias={}'.format(
+            self.in_features, self.out_features, not np.all(self.mu_bias.detach().numpy() == 0)
+        )
 
 
 class HyperLinear(nn.Module):

@@ -391,11 +391,13 @@ class NoisyLinearWithPrior(nn.Module):
         self.in_features = in_features
         self.out_features = out_features
         self.sigma = noisy_std
+        self.prior_std = prior_std
 
         self.reset()
         self.sample()
 
-        self.priormodel = LinearPriorNet(in_features, in_features, prior_std=prior_std)
+        if prior_std:
+            self.priormodel = LinearPriorNet(in_features, in_features, prior_std=prior_std)
 
     def reset(self) -> None:
         bound = 1 / np.sqrt(self.in_features)
@@ -413,6 +415,8 @@ class NoisyLinearWithPrior(nn.Module):
         self.eps_q.copy_(self.f(self.eps_q))  # type: ignore
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+        if self.prior_std:
+            x, prior_x = x.split(self.in_features, dim=1)
         if self.training:
             weight = self.mu_W + self.sigma_W * (
                 self.eps_q.ger(self.eps_p)  # type: ignore
@@ -422,9 +426,11 @@ class NoisyLinearWithPrior(nn.Module):
             weight = self.mu_W
             bias = self.mu_bias
         out =  F.linear(x, weight, bias)
-        prior_weight = self.priormodel(self.eps_q.ger(self.eps_p))
-        prior_out = F.linear(x, prior_weight)
-        return out + prior_out
+        if self.prior_std:
+            prior_weight = self.priormodel(self.eps_q.ger(self.eps_p))
+            prior_out = F.linear(prior_x, prior_weight)
+            out += prior_out
+        return out
 
     def extra_repr(self):
         return 'in_features={}, out_features={}, bias={}'.format(
@@ -476,9 +482,11 @@ class HyperLinearWithPrior(nn.Module):
         inp_dim = noize_dim
         out_dim = in_features * out_features + out_features
         self.hypermodel = nn.Linear(inp_dim, out_dim)
-        self.priormodel = LinearPriorNet(inp_dim, out_dim, prior_std=prior_std)
+        if prior_std > 0:
+            self.priormodel = LinearPriorNet(inp_dim, out_dim, prior_std=prior_std)
 
         self.noize_dim = noize_dim
+        self.prior_std = prior_std
         self.splited_size = [in_features * out_features, out_features]
         self.weight_shape = (in_features, out_features)
         self.bias_shape = (1, out_features)
@@ -491,14 +499,15 @@ class HyperLinearWithPrior(nn.Module):
         out = torch.bmm(x, weight) + bias
         return out.squeeze()
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, prior_x=None) -> torch.Tensor:
         noise = x[:, :self.noize_dim]
         x = x[:, self.noize_dim:]
-        hyper_params = self.hypermodel(noise)
-        hyper_out = self.base_forward(x, hyper_params)
-        prior_params = self.priormodel(noise)
-        prior_out = self.base_forward(x, prior_params)
-        out = hyper_out + prior_out
+        params = self.hypermodel(noise)
+        out = self.base_forward(x, params)
+        if prior_x is not None and self.prior_std > 0:
+            prior_params = self.priormodel(noise)
+            prior_out = self.base_forward(prior_x, prior_params)
+            out += prior_out
         return out
 
     def regularization(self, x: torch.Tensor, p: int = 2) -> torch.Tensor:

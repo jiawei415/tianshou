@@ -110,14 +110,12 @@ class HyperMLP(nn.Module):
         self.output_dim = output_dim
         self.model = linear_layer(input_dim, output_dim)
 
-    def forward(self, s: Union[np.ndarray, torch.Tensor]) -> torch.Tensor:
+    def forward(self, s: Union[np.ndarray, torch.Tensor], prior_s=None) -> torch.Tensor:
         if self.device is not None:
-            s = torch.as_tensor(
-                s,
-                device=self.device,  # type: ignore
-                dtype=torch.float32,
-            )
-        return self.model(s.flatten(1))  # type: ignore
+            s = torch.as_tensor(s, device=self.device, dtype=torch.float32).flatten(1)
+            if prior_s is not None:
+                prior_s = torch.as_tensor(prior_s, device=self.device, dtype=torch.float32).flatten(1)
+        return self.model(s, prior_s)  # type: ignore
 
     def regularization(self, s: Union[np.ndarray, torch.Tensor]) -> torch.Tensor:
         if self.device is not None:
@@ -239,6 +237,85 @@ class Net(nn.Module):
         return logits, state
 
 
+class NetWithPrior(nn.Module):
+    def __init__(
+        self,
+        state_shape: Union[int, Sequence[int]],
+        action_shape: Union[int, Sequence[int]] = 0,
+        hidden_sizes: Sequence[int] = (),
+        norm_layer: Optional[ModuleType] = None,
+        activation: Optional[ModuleType] = nn.ReLU,
+        device: Union[str, int, torch.device] = "cpu",
+        softmax: bool = False,
+        concat: bool = False,
+        prior_std: float = 1.,
+        num_atoms: int = 1,
+        dueling_param: Optional[Tuple[Dict[str, Any], Dict[str, Any]]] = None,
+    ) -> None:
+        super().__init__()
+        self.device = device
+        self.softmax = softmax
+        self.num_atoms = num_atoms
+        self.prior_std = prior_std
+        input_dim = int(np.prod(state_shape))
+        action_dim = int(np.prod(action_shape)) * num_atoms
+        if concat:
+            input_dim += action_dim
+        self.use_dueling = dueling_param is not None
+        output_dim = action_dim if not self.use_dueling and not concat else 0
+        self.basedmodel = MLP(
+            input_dim, output_dim, hidden_sizes, norm_layer, activation, device
+        )
+        if self.prior_std:
+            self.priormodel = MLP(
+                input_dim, output_dim, hidden_sizes, norm_layer, activation, device
+            )
+            for param in self.priormodel.parameters():
+                param.requires_grad = False
+        self.output_dim = self.basedmodel.output_dim
+        if self.use_dueling:  # dueling DQN
+            q_kwargs, v_kwargs = dueling_param  # type: ignore
+            q_output_dim, v_output_dim = 0, 0
+            if not concat:
+                q_output_dim, v_output_dim = action_dim, num_atoms
+            q_kwargs: Dict[str, Any] = {
+                **q_kwargs, "input_dim": self.output_dim,
+                "output_dim": q_output_dim,
+                "device": self.device
+            }
+            v_kwargs: Dict[str, Any] = {
+                **v_kwargs, "input_dim": self.output_dim,
+                "output_dim": v_output_dim,
+                "device": self.device
+            }
+            self.Q, self.V = MLP(**q_kwargs), MLP(**v_kwargs)
+            self.output_dim = self.Q.output_dim
+
+    def forward(
+        self,
+        s: Union[np.ndarray, torch.Tensor],
+        state: Any = None,
+        info: Dict[str, Any] = {},
+    ) -> Tuple[torch.Tensor, Any]:
+        """Mapping: s -> flatten (inside MLP)-> logits."""
+        logits = self.basedmodel(s)
+        if self.prior_std:
+            prior_logits = self.priormodel(s)
+            logits = torch.cat([logits, prior_logits], dim=1)
+        bsz = logits.shape[0]
+        if self.use_dueling:  # Dueling DQN
+            q, v = self.Q(logits), self.V(logits)
+            if self.num_atoms > 1:
+                q = q.view(bsz, -1, self.num_atoms)
+                v = v.view(bsz, -1, self.num_atoms)
+            logits = q - q.mean(dim=1, keepdim=True) + v
+        elif self.num_atoms > 1:
+            logits = logits.view(bsz, -1, self.num_atoms)
+        if self.softmax:
+            logits = torch.softmax(logits, dim=-1)
+        return logits, state
+
+
 class HyperNet(nn.Module):
     def __init__(
         self,
@@ -341,16 +418,16 @@ class HyperNetWithPrior(nn.Module):
             input_dim += action_dim
         self.use_dueling = dueling_param is not None
         output_dim = action_dim if not self.use_dueling and not concat else 0
-        self.model = MLP(
+        self.basedmodel = MLP(
             input_dim, output_dim, hidden_sizes, norm_layer, activation, device
         )
         if self.prior_std:
-            self.base_priormodel = MLP(
+            self.priormodel = MLP(
                 input_dim, output_dim, hidden_sizes, norm_layer, activation, device
             )
-            for param in self.base_priormodel.parameters():
+            for param in self.priormodel.parameters():
                 param.requires_grad = False
-        self.output_dim = self.model.output_dim
+        self.output_dim = self.basedmodel.output_dim
         if self.use_dueling:  # dueling DQN
             q_kwargs, v_kwargs = dueling_param  # type: ignore
             q_output_dim, v_output_dim = 0, 0
@@ -379,14 +456,12 @@ class HyperNetWithPrior(nn.Module):
         noise = s[:, :self.noise_dim]
         noise = torch.tensor(noise).to(self.device)
         s = s[:, self.noise_dim:]
-        logits = self.model(s)
-        if self.prior_std:
-            prior_logits = self.base_priormodel(s)
-            logits += prior_logits
+        logits = self.basedmodel(s)
         logits = torch.cat([noise, logits], dim=1)
+        prior_logits = self.priormodel(s) if self.prior_std else None
         bsz = logits.shape[0]
         if self.use_dueling:  # Dueling DQN
-            q, v = self.Q(logits), self.V(logits)
+            q, v = self.Q(logits, prior_logits), self.V(logits, prior_logits)
             if self.num_atoms > 1:
                 q = q.view(bsz, -1, self.num_atoms)
                 v = v.view(bsz, -1, self.num_atoms)

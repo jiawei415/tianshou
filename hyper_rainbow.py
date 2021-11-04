@@ -15,8 +15,8 @@ from tianshou.env import DummyVectorEnv
 from tianshou.policy import RainbowPolicy, HyperRainbowPolicy
 from tianshou.trainer import offpolicy_trainer
 from tianshou.utils import TensorboardLogger
-from tianshou.utils.net.common import Net, HyperNetWithPrior
-from tianshou.utils.net.discrete import NoisyLinear, NoisyLinearWithPrior, HyperLinear, HyperLinearWithPrior
+from tianshou.utils.net.common import NetWithPrior, HyperNetWithPrior
+from tianshou.utils.net.discrete import NoisyLinearWithPrior, HyperLinearWithPrior
 
 
 class NoiseWrapper(gym.Wrapper):
@@ -117,15 +117,9 @@ def test_rainbow(args=get_args()):
     # model
     def last_linear(x, y):
         if args.noise_dim:
-            if args.prior_std:
-                return HyperLinearWithPrior(x, y, noize_dim=args.noise_dim, prior_std=args.prior_std)
-            else:
-                return HyperLinear(x, y, noize_dim=args.noise_dim)
+            return HyperLinearWithPrior(x, y, noize_dim=args.noise_dim, prior_std=args.prior_std)
         else:
-            if args.prior_std:
-                return NoisyLinearWithPrior(x, y, noisy_std=args.noisy_std, prior_std=args.prior_std)
-            else:
-                return NoisyLinear(x, y, noisy_std=args.noisy_std)
+            return NoisyLinearWithPrior(x, y, noisy_std=args.noisy_std, prior_std=args.prior_std)
 
     model_params = {
         "state_shape": args.state_shape,
@@ -134,18 +128,14 @@ def test_rainbow(args=get_args()):
         "device": args.device,
         "softmax": True,
         "num_atoms": args.num_atoms,
+        "prior_std": args.prior_std,
         "dueling_param": ({ "linear_layer": last_linear}, {"linear_layer": last_linear})
     }
     if args.noise_dim:
-        model_params.update(
-            {
-                "prior_std": args.prior_std,
-                "noise_dim": args.noise_dim,
-            }
-        )
+        model_params.update({"noise_dim": args.noise_dim,})
         model = HyperNetWithPrior(**model_params)
     else:
-        model = Net(**model_params)
+        model = NetWithPrior(**model_params)
     print(f"Network structure:\n{str(model)}")
 
     # optimizer
@@ -169,8 +159,7 @@ def test_rainbow(args=get_args()):
         "target_update_freq": args.target_update_freq
     }
     if args.noise_dim:
-        if args.prior_std:
-            hyper_reg_coef = args.hyper_reg_coef / (args.prior_std ** 2)
+        hyper_reg_coef = args.hyper_reg_coef / (args.prior_std ** 2) if args.prior_std else args.hyper_reg_coef
         policy_params.update(
             {
                 "noise_std": args.noise_std,

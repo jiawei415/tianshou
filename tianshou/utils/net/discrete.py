@@ -575,7 +575,7 @@ def sample_noise(model: nn.Module) -> bool:
     """
     done = False
     for m in model.modules():
-        if isinstance(m, NoisyLinear):
+        if isinstance(m, NoisyLinear) or isinstance(m, NoisyLinearWithPrior):
             m.sample()
             done = True
     return done

@@ -51,7 +51,7 @@ def get_args():
     parser.add_argument('--seed', type=int, default=2021)
     parser.add_argument('--eps-test', type=float, default=0.05)
     parser.add_argument('--eps-train', type=float, default=0.1)
-    parser.add_argument('--buffer-size', type=int, default=1e-6)
+    parser.add_argument('--buffer-size', type=int, default=1e6)
     parser.add_argument('--lr', type=float, default=1e-4)
     parser.add_argument('--hyper-reg-coef', type=float, default=0.01)
     parser.add_argument('--hyper-weight-decay', type=float, default=1e-4)

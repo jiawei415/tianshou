@@ -372,6 +372,39 @@ class NoisyLinear(nn.Module):
         )
 
 
+class PriorNoisyLinear(nn.Module):
+    def __init__(
+        self, in_features: int, out_features: int, noisy_std: float = 0.5, prior_std: float = 1.,
+    ) -> None:
+        super().__init__()
+
+        # Learnable parameters.
+        self.mu_W = nn.Parameter(torch.randn(out_features, in_features))
+        self.sigma_W = nn.Parameter(torch.randn(out_features, in_features))
+        self.mu_bias = nn.Parameter(torch.randn(out_features))
+        self.sigma_bias = nn.Parameter(torch.randn(out_features))
+
+        self.in_features = in_features
+        self.out_features = out_features
+        self.sigma = noisy_std
+        self.prior_std = prior_std
+
+    def forward(self, x: torch.Tensor, eps_p: torch.Tensor, eps_q: torch.Tensor, training: bool) -> torch.Tensor:
+        if training:
+            weight = self.mu_W + self.sigma_W * (eps_q.ger(eps_p))  # type: ignore
+            bias = self.mu_bias + self.sigma_bias * eps_q.clone() # type: ignore
+        else:
+            weight = self.mu_W
+            bias = self.mu_bias
+        out =  F.linear(x, weight, bias)
+        return out
+
+    def extra_repr(self):
+        return 'in_features={}, out_features={}, bias={}'.format(
+            self.in_features, self.out_features, not np.all(self.mu_bias.detach().numpy() == 0)
+        )
+
+
 class NoisyLinearWithPrior(nn.Module):
     def __init__(
         self, in_features: int, out_features: int, noisy_std: float = 0.5, prior_std: float = 1.,
@@ -397,7 +430,7 @@ class NoisyLinearWithPrior(nn.Module):
         self.sample()
 
         if prior_std:
-            self.priormodel = LinearPriorNet(in_features, in_features, prior_std=prior_std)
+            self.priormodel = PriorNoisyLinear(in_features, out_features, noisy_std=noisy_std, prior_std=prior_std)
 
     def reset(self) -> None:
         bound = 1 / np.sqrt(self.in_features)
@@ -427,8 +460,7 @@ class NoisyLinearWithPrior(nn.Module):
             bias = self.mu_bias
         out =  F.linear(x, weight, bias)
         if self.prior_std:
-            prior_weight = self.priormodel(self.eps_q.ger(self.eps_p))
-            prior_out = F.linear(prior_x, prior_weight)
+            prior_out = self.priormodel(prior_x, self.eps_p, self.eps_q, self.training)
             out += prior_out
         return out
 
@@ -483,7 +515,7 @@ class HyperLinearWithPrior(nn.Module):
         out_dim = in_features * out_features + out_features
         self.hypermodel = nn.Linear(inp_dim, out_dim)
         if prior_std > 0:
-            self.priormodel = LinearPriorNet(inp_dim, out_dim, prior_std=prior_std)
+            self.priormodel = PriorHyperLinear(inp_dim, out_dim, prior_std=prior_std)
 
         self.noize_dim = noize_dim
         self.prior_std = prior_std
@@ -517,7 +549,7 @@ class HyperLinearWithPrior(nn.Module):
         return reg_loss.mean()
 
 
-class LinearPriorNet(torch.nn.Module):
+class PriorHyperLinear(torch.nn.Module):
     def __init__(
             self,
             input_size: int,

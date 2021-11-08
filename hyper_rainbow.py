@@ -37,9 +37,10 @@ class NoiseWrapper(gym.Wrapper):
         return np.hstack([self.now_noise, state]), reward, done, info
 
 
-def make_env(env_name, noise_dim=0):
+def make_env(env_name, noise_dim=0, max_step=None):
     env = gym.make(env_name)
-    env._max_episode_steps = 500
+    if max_step is not None:
+        env._max_episode_steps = max_step
     if noise_dim:
         env = NoiseWrapper(env, noise_dim=noise_dim)
     return env
@@ -48,6 +49,7 @@ def make_env(env_name, noise_dim=0):
 def get_args():
     parser = argparse.ArgumentParser()
     parser.add_argument('--task', type=str, default='MountainCar-v0')
+    parser.add_argument('--max-step', type=int, default=500)
     parser.add_argument('--seed', type=int, default=2021)
     parser.add_argument('--eps-test', type=float, default=0.)
     parser.add_argument('--eps-train', type=float, default=0.)
@@ -89,23 +91,23 @@ def get_args():
     )
     parser.add_argument("--save-interval", type=int, default=4)
     parser.add_argument('--config', type=str, default="{}",
-                        help="game config eg., {'seed':2021,'noise_dim':2,'prior_std':2,'hyper_reg_coef':0.01,}")
+                        help="game config eg., {'seed':2021,'max_step':200,'hidden_sizes':[128,128],'noise_dim':2,'prior_std':2,'hyper_reg_coef':0.01,}")
     args = parser.parse_known_args()[0]
     return args
 
 
 def test_rainbow(args=get_args()):
     # environment
-    env = make_env(args.task, noise_dim=args.noise_dim)
+    env = make_env(args.task, noise_dim=args.noise_dim, max_step=args.max_step)
     args.state_shape = env.observation_space.shape or env.observation_space.n
     args.action_shape = env.action_space.shape or env.action_space.n
     env.close()
     # you can also use tianshou.env.SubprocVectorEnv
     train_envs = DummyVectorEnv(
-        [lambda: make_env(args.task, noise_dim=args.noise_dim) for _ in range(args.training_num)]
+        [lambda: make_env(args.task, noise_dim=args.noise_dim, max_step=args.max_step) for _ in range(args.training_num)]
     )
     test_envs = DummyVectorEnv(
-        [lambda: make_env(args.task, noise_dim=args.noise_dim) for _ in range(args.test_num)]
+        [lambda: make_env(args.task, noise_dim=args.noise_dim, max_step=args.max_step) for _ in range(args.test_num)]
     )
 
     # seed
@@ -181,7 +183,7 @@ def test_rainbow(args=get_args()):
             print("Successfully restore policy.")
         else:
             print("Fail to restore policy.")
-        env = make_env(args.task, noise_dim=args.noise_dim)
+        env = make_env(args.task, noise_dim=args.noise_dim, max_step=args.max_step)
         policy.eval()
         policy.set_eps(args.eps_test)
         collector = Collector(policy, env)

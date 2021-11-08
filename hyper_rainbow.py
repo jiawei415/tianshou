@@ -47,10 +47,10 @@ def make_env(env_name, noise_dim=0):
 
 def get_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--task', type=str, default='Acrobot-v1')
+    parser.add_argument('--task', type=str, default='MountainCar-v0')
     parser.add_argument('--seed', type=int, default=2021)
-    parser.add_argument('--eps-test', type=float, default=0.05)
-    parser.add_argument('--eps-train', type=float, default=0.1)
+    parser.add_argument('--eps-test', type=float, default=0.)
+    parser.add_argument('--eps-train', type=float, default=0.)
     parser.add_argument('--buffer-size', type=int, default=1e6)
     parser.add_argument('--lr', type=float, default=1e-4)
     parser.add_argument('--hyper-reg-coef', type=float, default=0.01)
@@ -71,7 +71,7 @@ def get_args():
     parser.add_argument('--step-per-collect', type=int, default=8)
     parser.add_argument('--update-per-step', type=float, default=0.125)
     parser.add_argument('--batch-size', type=int, default=128)
-    parser.add_argument('--hidden-sizes', type=int, nargs='*', default=[512, 512])
+    parser.add_argument('--hidden-sizes', type=int, nargs='*', default=[128, 128])
     parser.add_argument('--training-num', type=int, default=8)
     parser.add_argument('--test-num', type=int, default=100)
     parser.add_argument('--logdir', type=str, default='results')
@@ -203,8 +203,8 @@ def test_rainbow(args=get_args()):
         buf = VectorReplayBuffer(args.buffer_size, buffer_num=len(train_envs))
 
     # collector
-    train_collector = Collector(policy, train_envs, buf, exploration_noise=True)
-    test_collector = Collector(policy, test_envs, exploration_noise=True)
+    train_collector = Collector(policy, train_envs, buf, exploration_noise=False)
+    test_collector = Collector(policy, test_envs, exploration_noise=False)
     # policy.set_eps(1)
     train_collector.collect(n_step=args.batch_size * args.training_num)
 

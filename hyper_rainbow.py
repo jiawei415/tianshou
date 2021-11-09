@@ -4,7 +4,6 @@ import time
 import json
 import pickle
 import pprint
-
 import gym
 import numpy as np
 import torch
@@ -37,8 +36,9 @@ class NoiseWrapper(gym.Wrapper):
         return np.hstack([self.now_noise, state]), reward, done, info
 
 
-def make_env(env_name, noise_dim=0, max_step=None):
-    env = gym.make(env_name)
+def make_env(env_name, max_step=None, noise_dim=0, size=10, seed=2021):
+    env_config = {'size': size, 'seed':seed, 'mapping_seed': seed} if 'DeepSea' in env_name else {}
+    env = gym.make(env_name, **env_config)
     if max_step is not None:
         env._max_episode_steps = max_step
     if noise_dim:
@@ -50,6 +50,7 @@ def get_args():
     parser = argparse.ArgumentParser()
     parser.add_argument('--task', type=str, default='MountainCar-v0')
     parser.add_argument('--max-step', type=int, default=500)
+    parser.add_argument('--size', type=int, default=10)
     parser.add_argument('--seed', type=int, default=2021)
     parser.add_argument('--eps-test', type=float, default=0.)
     parser.add_argument('--eps-train', type=float, default=0.)
@@ -91,24 +92,33 @@ def get_args():
     )
     parser.add_argument("--save-interval", type=int, default=4)
     parser.add_argument('--config', type=str, default="{}",
-                        help="game config eg., {'seed':2021,'max_step':200,'hidden_sizes':[128,128],'noise_dim':2,'prior_std':2,'hyper_reg_coef':0.01,}")
+                        help="game config eg., {'seed':2021,'size':20,'max_step':200,'hidden_sizes':[128,128],'noise_dim':2,'prior_std':2,'hyper_reg_coef':0.01,}")
     args = parser.parse_known_args()[0]
     return args
 
 
 def test_rainbow(args=get_args()):
     # environment
-    env = make_env(args.task, noise_dim=args.noise_dim, max_step=args.max_step)
-    args.state_shape = env.observation_space.shape or env.observation_space.n
-    args.action_shape = env.action_space.shape or env.action_space.n
-    env.close()
+    def make_thunk(seed):
+        return lambda: make_env(
+            env_name=args.task,
+            max_step=args.max_step,
+            noise_dim=args.noise_dim,
+            size=args.size,
+            seed=seed,
+        )
+    if 'DeepSea' in args.task:
+        args.training_num = 1
+        args.test_num = args.training_num
     # you can also use tianshou.env.SubprocVectorEnv
-    train_envs = DummyVectorEnv(
-        [lambda: make_env(args.task, noise_dim=args.noise_dim, max_step=args.max_step) for _ in range(args.training_num)]
-    )
-    test_envs = DummyVectorEnv(
-        [lambda: make_env(args.task, noise_dim=args.noise_dim, max_step=args.max_step) for _ in range(args.test_num)]
-    )
+    train_envs = DummyVectorEnv([make_thunk(seed=args.seed + i) for i in range(args.training_num)])
+    test_envs = DummyVectorEnv([make_thunk(seed=args.seed + i) for i in range(args.test_num)])
+    if 'DeepSea' in args.task:
+        train_action_mappling = np.array([action_mapping() for action_mapping in train_envs.get_action_mapping])
+        test_action_mappling = np.array([action_mapping() for action_mapping in test_envs.get_action_mapping])
+        assert (train_action_mappling == test_action_mappling).all()
+    args.state_shape = train_envs.observation_space[0].shape or train_envs.observation_space[0].n
+    args.action_shape = train_envs.action_space[0].shape or train_envs.action_space[0].n
 
     # seed
     np.random.seed(args.seed)
@@ -183,7 +193,7 @@ def test_rainbow(args=get_args()):
             print("Successfully restore policy.")
         else:
             print("Fail to restore policy.")
-        env = make_env(args.task, noise_dim=args.noise_dim, max_step=args.max_step)
+        env = DummyVectorEnv([make_thunk(seed=args.seed)])
         policy.eval()
         policy.set_eps(args.eps_test)
         collector = Collector(policy, env)

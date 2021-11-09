@@ -17,3 +17,11 @@ __all__ = [
     "RayVectorEnv",
     "MultiAgentEnv",
 ]
+
+
+from gym.envs.registration import register
+
+register(
+    id='DeepSea-v0',
+    entry_point='tianshou.env.deepsea:DeepSea',
+)

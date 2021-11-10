@@ -5,6 +5,7 @@ import torch
 
 from tianshou.data import Batch, ReplayBuffer
 from tianshou.policy import DQNPolicy
+from tianshou.utils.net.discrete import sample_noise
 
 
 class C51Policy(DQNPolicy):
@@ -93,6 +94,7 @@ class C51Policy(DQNPolicy):
         with torch.no_grad():
             target_dist = self._target_dist(batch)
         weight = batch.pop("weight", 1.0)
+        sample_noise(self.model)
         curr_dist = self(batch).logits
         act = batch.act
         curr_dist = curr_dist[np.arange(len(act)), act, :]
@@ -103,6 +105,7 @@ class C51Policy(DQNPolicy):
         loss.backward()
         self.optim.step()
         self._iter += 1
+        sample_noise(self.model)
         return {"loss": loss.item()}
 
 

@@ -54,11 +54,12 @@ def get_args():
     parser.add_argument('--seed', type=int, default=2021)
     parser.add_argument('--eps-test', type=float, default=0.)
     parser.add_argument('--eps-train', type=float, default=0.)
-    parser.add_argument('--buffer-size', type=int, default=1e6)
+    parser.add_argument('--buffer-size', type=int, default=50000)
+    parser.add_argument('--min-replay-size', type=int, default=500)
     parser.add_argument('--lr', type=float, default=1e-4)
     parser.add_argument('--hyper-reg-coef', type=float, default=0.01)
-    parser.add_argument('--hyper-weight-decay', type=float, default=1e-4)
-    parser.add_argument('--base-weight-decay', type=float, default=1e-4)
+    parser.add_argument('--hyper-weight-decay', type=float, default=0.0003125)
+    parser.add_argument('--base-weight-decay', type=float, default=0.0003125)
     parser.add_argument('--gamma', type=float, default=0.99)
     parser.add_argument('--num-atoms', type=int, default=51)
     parser.add_argument('--v-min', type=float, default=-200.)
@@ -70,12 +71,12 @@ def get_args():
     parser.add_argument('--n-step', type=int, default=3)
     parser.add_argument('--target-update-freq', type=int, default=100)
     parser.add_argument('--epoch', type=int, default=10000)
-    parser.add_argument('--step-per-epoch', type=int, default=500)
-    parser.add_argument('--step-per-collect', type=int, default=8)
-    parser.add_argument('--update-per-step', type=float, default=0.125)
+    parser.add_argument('--step-per-epoch', type=int, default=10000)
+    parser.add_argument('--step-per-collect', type=int, default=2)
+    parser.add_argument('--update-per-step', type=int, default=1)
     parser.add_argument('--batch-size', type=int, default=128)
     parser.add_argument('--hidden-sizes', type=int, nargs='*', default=[128, 128])
-    parser.add_argument('--training-num', type=int, default=8)
+    parser.add_argument('--training-num', type=int, default=1)
     parser.add_argument('--test-num', type=int, default=100)
     parser.add_argument('--logdir', type=str, default='results')
     parser.add_argument('--render', type=float, default=0.)
@@ -92,7 +93,7 @@ def get_args():
     )
     parser.add_argument("--save-interval", type=int, default=4)
     parser.add_argument('--config', type=str, default="{}",
-                        help="game config eg., {'seed':2021,'size':20,'max_step':200,'hidden_sizes':[128,128],'noise_dim':2,'prior_std':2,'hyper_reg_coef':0.01,}")
+                        help="game config eg., {'seed':2021,'size':20,'hidden_sizes':[512,512],'noise_dim':2,'prior_std':2,'hyper_reg_coef':0.01,}")
     args = parser.parse_known_args()[0]
     return args
 
@@ -218,7 +219,7 @@ def test_rainbow(args=get_args()):
     train_collector = Collector(policy, train_envs, buf, exploration_noise=False)
     test_collector = Collector(policy, test_envs, exploration_noise=False)
     # policy.set_eps(1)
-    train_collector.collect(n_step=args.batch_size * args.training_num)
+    train_collector.collect(n_step=args.min_replay_size)
 
     # log
     log_name = f"{args.task[:-3].lower()}_{args.seed}_{time.strftime('%Y%m%d%H%M%S', time.localtime())}"
@@ -296,6 +297,8 @@ def test_rainbow(args=get_args()):
             print("Fail to restore buffer.")
 
     # trainer
+    args.step_per_collect *= args.training_num
+    args.update_per_step /= args.step_per_collect
     result = offpolicy_trainer(
         policy,
         train_collector,

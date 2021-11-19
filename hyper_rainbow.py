@@ -80,7 +80,7 @@ def get_args():
     parser.add_argument('--test-num', type=int, default=100)
     parser.add_argument('--logdir', type=str, default='results')
     parser.add_argument('--render', type=float, default=0.)
-    parser.add_argument('--prioritized-replay', action="store_true", default=True)
+    parser.add_argument('--prioritized', action="store_true", default=True)
     parser.add_argument('--alpha', type=float, default=0.6)
     parser.add_argument('--beta', type=float, default=0.4)
     parser.add_argument('--beta-final', type=float, default=1.)
@@ -88,9 +88,7 @@ def get_args():
     parser.add_argument('--resume-path', type=str, default='')
     parser.add_argument('--evaluation', action="store_true", default=False)
     parser.add_argument('--policy-path', type=str, default='')
-    parser.add_argument(
-        '--device', type=str, default='cuda' if torch.cuda.is_available() else 'cpu'
-    )
+    parser.add_argument('--device', type=str, default='cuda' if torch.cuda.is_available() else 'cpu')
     parser.add_argument("--save-interval", type=int, default=4)
     parser.add_argument('--config', type=str, default="{}",
                         help="game config eg., {'seed':2021,'size':20,'hidden_sizes':[512,512],'noise_dim':2,'prior_std':2,'hyper_reg_coef':0.01,}")
@@ -98,7 +96,7 @@ def get_args():
     return args
 
 
-def test_rainbow(args=get_args()):
+def run_hyper_rainbow(args=get_args()):
     # environment
     def make_thunk(seed):
         return lambda: make_env(
@@ -108,9 +106,9 @@ def test_rainbow(args=get_args()):
             size=args.size,
             seed=seed,
         )
+
     if 'DeepSea' in args.task:
-        args.training_num = 1
-        args.test_num = args.training_num
+        args.training_num = args.test_num = 1
     # you can also use tianshou.env.SubprocVectorEnv
     train_envs = DummyVectorEnv([make_thunk(seed=args.seed + i) for i in range(args.training_num)])
     test_envs = DummyVectorEnv([make_thunk(seed=args.seed + i) for i in range(args.test_num)])
@@ -204,7 +202,7 @@ def test_rainbow(args=get_args()):
         return None
 
     # buffer
-    if args.prioritized_replay:
+    if args.prioritized:
         buf = PrioritizedVectorReplayBuffer(
             args.buffer_size,
             buffer_num=len(train_envs),
@@ -250,7 +248,7 @@ def test_rainbow(args=get_args()):
         else:
             policy.set_eps(0.1 * args.eps_train)
         # beta annealing, just a demo
-        if args.prioritized_replay:
+        if args.prioritized:
             if env_step <= 10000:
                 beta = args.beta
             elif env_step <= 50000:
@@ -321,42 +319,6 @@ def test_rainbow(args=get_args()):
     pprint.pprint(result)
 
 
-def test_rainbow_resume(args=get_args()):
-    args.resume = True
-    test_rainbow(args)
-
-
-def test_prainbow(args=get_args()):
-    args.prioritized_replay = True
-    args.gamma = .95
-    args.seed = 1
-    test_rainbow(args)
-
-
-def test_hyperrainbow(args=get_args()):
-    args.prioritized_replay = True
-    args.gamma = .95
-    args.seed = 2021
-    args.hyper_reg_coef = 0.01
-    args.prior_std = 2.
-    args.noise_std = 1.
-    args.noise_dim = 2
-    args.noisy_std = 0.1
-    test_rainbow(args)
-
-
-def train_hyperrainbow(args=get_args()):
-    args.prioritized_replay = True
-    args.gamma = .95
-    args.seed = 2021
-    args.hyper_reg_coef = 0.01
-    args.prior_std = 2.
-    args.noise_std = 1.
-    args.noise_dim = 2
-    args.noisy_std = 0.1
-    test_rainbow(args)
-
-
 if __name__ == '__main__':
     args = get_args()
     config = eval(args.config)
@@ -365,5 +327,4 @@ if __name__ == '__main__':
             print(f'unrecognized config k: {k}, v: {v}, ignored')
             continue
         args.__dict__[k] = v
-    test_rainbow(args)
-    # test_hyperrainbow()
+    run_hyper_rainbow(args)

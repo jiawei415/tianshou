@@ -7,6 +7,7 @@ import pprint
 import gym
 import numpy as np
 import torch
+import torch.nn as nn
 from torch.utils.tensorboard import SummaryWriter
 
 from tianshou.data import Collector, PrioritizedVectorReplayBuffer, VectorReplayBuffer
@@ -16,6 +17,32 @@ from tianshou.trainer import offpolicy_trainer
 from tianshou.utils import TensorboardLogger
 from tianshou.utils.net.common import NetWithPrior, HyperNetWithPrior
 from tianshou.utils.net.discrete import NoisyLinearWithPrior, HyperLinearWithPrior
+
+def init_model(model, method='uniform', bias=0.):
+    if method == 'xavier':
+        init_fn = nn.init.xavier_normal_
+    elif method == 'uniform':
+        init_fn = nn.init.xavier_uniform_
+    else:
+        raise NotImplementedError
+    for name, param in model.named_parameters():
+        if 'bias' in name:
+            nn.init.constant(param, bias)
+        if 'basedmodel' in name or 'priormodel.model' in name:
+            init_fn(param)
+
+
+def init_module(module, method='uniform', bias=0.):
+    if method == 'xavier':
+        init_fn = nn.init.xavier_normal_
+    elif method == 'uniform':
+        init_fn = nn.init.xavier_uniform_
+    else:
+        raise NotImplementedError
+    classname = module.__class__.__name__
+    if classname == "Linear":
+        init_fn(module.weight)
+        nn.init.constant(module.bias, bias)
 
 
 class NoiseWrapper(gym.Wrapper):
@@ -56,30 +83,31 @@ def get_args():
     parser.add_argument('--eps-train', type=float, default=0.)
     parser.add_argument('--buffer-size', type=int, default=50000)
     parser.add_argument('--min-replay-size', type=int, default=500)
-    parser.add_argument('--lr', type=float, default=1e-4)
+    parser.add_argument('--lr', type=float, default=0.0001)
     parser.add_argument('--hyper-reg-coef', type=float, default=0.01)
     parser.add_argument('--hyper-weight-decay', type=float, default=0.0003125)
     parser.add_argument('--base-weight-decay', type=float, default=0.0003125)
     parser.add_argument('--gamma', type=float, default=0.99)
     parser.add_argument('--num-atoms', type=int, default=51)
-    parser.add_argument('--v-min', type=float, default=-200.)
-    parser.add_argument('--v-max', type=float, default=200.)
-    parser.add_argument('--prior-std', type=float, default=2.)
+    # parser.add_argument('--v-min', type=float, default=-100.)
+    parser.add_argument('--v-max', type=float, default=100.)
+    parser.add_argument('--prior-std', type=float, default=0.)
     parser.add_argument('--noise-std', type=float, default=1.)
-    parser.add_argument('--noise-dim', type=int, default=2)
+    parser.add_argument('--noise-dim', type=int, default=0)
     parser.add_argument('--noisy-std', type=float, default=0.1)
     parser.add_argument('--n-step', type=int, default=3)
     parser.add_argument('--target-update-freq', type=int, default=100)
-    parser.add_argument('--epoch', type=int, default=10000)
-    parser.add_argument('--step-per-epoch', type=int, default=10000)
+    parser.add_argument('--epoch', type=int, default=50)
+    parser.add_argument('--step-per-epoch', type=int, default=1000)
     parser.add_argument('--step-per-collect', type=int, default=2)
     parser.add_argument('--update-per-step', type=int, default=1)
     parser.add_argument('--batch-size', type=int, default=128)
-    parser.add_argument('--hidden-sizes', type=int, nargs='*', default=[128, 128])
+    parser.add_argument('--hidden-sizes', type=int, nargs='*', default=[512, 512])
     parser.add_argument('--training-num', type=int, default=1)
     parser.add_argument('--test-num', type=int, default=100)
     parser.add_argument('--logdir', type=str, default='results')
     parser.add_argument('--render', type=float, default=0.)
+    parser.add_argument('--norm-obs', action="store_true", default=True)
     parser.add_argument('--prioritized', action="store_true", default=True)
     parser.add_argument('--alpha', type=float, default=0.6)
     parser.add_argument('--beta', type=float, default=0.4)
@@ -110,8 +138,8 @@ def run_hyper_rainbow(args=get_args()):
     if 'DeepSea' in args.task:
         args.training_num = args.test_num = 1
     # you can also use tianshou.env.SubprocVectorEnv
-    train_envs = DummyVectorEnv([make_thunk(seed=args.seed + i) for i in range(args.training_num)])
-    test_envs = DummyVectorEnv([make_thunk(seed=args.seed + i) for i in range(args.test_num)])
+    train_envs = DummyVectorEnv([make_thunk(seed=args.seed + i) for i in range(args.training_num)], norm_obs=args.norm_obs)
+    test_envs = DummyVectorEnv([make_thunk(seed=args.seed + i) for i in range(args.test_num)], norm_obs=args.norm_obs)
     if 'DeepSea' in args.task:
         train_action_mappling = np.array([action_mapping() for action_mapping in train_envs.get_action_mapping])
         test_action_mappling = np.array([action_mapping() for action_mapping in test_envs.get_action_mapping])
@@ -147,6 +175,8 @@ def run_hyper_rainbow(args=get_args()):
         model = HyperNetWithPrior(**model_params)
     else:
         model = NetWithPrior(**model_params)
+    # model.apply(init_module)
+    # init_model(model)
     print(f"Network structure:\n{str(model)}")
 
     # optimizer
@@ -164,7 +194,7 @@ def run_hyper_rainbow(args=get_args()):
         "optim": optim,
         "discount_factor": args.gamma,
         "num_atoms": args.num_atoms,
-        "v_min": args.v_min,
+        "v_min": -args.v_max,
         "v_max": args.v_max,
         "estimation_step": args.n_step,
         "target_update_freq": args.target_update_freq

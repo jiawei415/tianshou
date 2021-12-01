@@ -368,7 +368,7 @@ class NoisyLinear(nn.Module):
 
     def extra_repr(self):
         return 'in_features={}, out_features={}, bias={}'.format(
-            self.in_features, self.out_features, not np.all(self.mu_bias.detach().numpy() == 0)
+            self.in_features, self.out_features, not np.all(self.mu_bias.cpu().detach().numpy() == 0)
         )
 
 
@@ -410,7 +410,7 @@ class PriorNoisyLinear(nn.Module):
 
     def extra_repr(self):
         return 'in_features={}, out_features={}, bias={}'.format(
-            self.in_features, self.out_features, not np.all(self.mu_bias.detach().numpy() == 0)
+            self.in_features, self.out_features, not np.all(self.mu_bias.cpu().detach().numpy() == 0)
         )
 
 
@@ -475,7 +475,7 @@ class NoisyLinearWithPrior(nn.Module):
 
     def extra_repr(self):
         return 'in_features={}, out_features={}, bias={}'.format(
-            self.in_features, self.out_features, not np.all(self.mu_bias.detach().numpy() == 0)
+            self.in_features, self.out_features, not np.all(self.mu_bias.cpu().detach().numpy() == 0)
         )
 
 
@@ -603,7 +603,7 @@ class PriorHyperLinear(torch.nn.Module):
 
     def extra_repr(self):
         return 'in_features={}, out_features={}, bias={}'.format(
-            self.in_features, self.out_features, not np.all(self.bias.numpy() == 0)
+            self.in_features, self.out_features, not np.all(self.bias.cpu().detach().numpy() == 0)
         )
 
 
@@ -654,7 +654,7 @@ class NewNoisyLinear(nn.Module):
 
     def extra_repr(self):
         return 'in_features={}, out_features={}, bias={}'.format(
-            self.in_features, self.out_features, not np.all(self.mu_bias.detach().numpy() == 0)
+            self.in_features, self.out_features, not np.all(self.mu_bias.cpu().detach().numpy() == 0)
         )
 
 

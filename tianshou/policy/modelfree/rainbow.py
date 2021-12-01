@@ -85,10 +85,10 @@ class NewRainbowPolicy(C51Policy):
         v_max: float = 10,
         noise_dim: int = 2,
         noise_std: float = 1.,
-        batch_size: int = 32,
         hyper_reg_coef: float = 0.001,
         estimation_step: int = 1,
         target_update_freq: int = 0,
+        action_select_scheme: str = "step",
         reward_normalization: bool = False,
         **kwargs: Any
     ) -> None:
@@ -101,8 +101,8 @@ class NewRainbowPolicy(C51Policy):
         self.q_out_dim = model.Q.output_dim
         self.noise_dim = noise_dim
         self.noise_std = noise_std
-        self.batch_size = batch_size
         self.hyper_reg_coef = hyper_reg_coef
+        self.action_select_scheme = action_select_scheme
 
     def _target_dist(self, batch: Batch) -> torch.Tensor:
         if self._target:
@@ -131,19 +131,13 @@ class NewRainbowPolicy(C51Policy):
         is_collecting: bool = True,
         **kwargs: Any
     ) -> Batch:
+        done = batch['done'][0] if len(batch['done'].shape) > 0 else True
         obs = batch[input]
         obs_ = obs.obs if hasattr(obs, "obs") else obs
-        if is_collecting:
-            if self.noise_dim:
-                noise = hyper_layer_noise(obs_.shape[0], self.noise_dim * 2, self.noise_std)
-                Q_noise, V_noise = noise.split([self.noise_dim, self.noise_dim], dim=1)
-                self.model.Q.model.reset_noise(Q_noise)
-                self.model.V.model.reset_noise(V_noise)
-            else:
-                Q_eps_p, Q_eps_q = noisy_layer_noise(self.last_layer_inp_dim, self.q_out_dim)
-                V_eps_p, V_eps_q = noisy_layer_noise(self.last_layer_inp_dim, self.v_out_dim)
-                self.model.Q.model.reset_noise(Q_eps_p, Q_eps_q)
-                self.model.V.model.reset_noise(V_eps_p, V_eps_q)
+        if is_collecting and self.action_select_scheme == "step":
+            self.reset_noise(obs_.shape[0], reset_target=False)
+        elif is_collecting and done:
+            self.reset_noise(obs_.shape[0], reset_target=False)
         model = getattr(self, model)
         logits, h = model(obs_, state=state, info=batch.info)
         q = self.compute_q_value(logits, getattr(obs, "mask", None))
@@ -153,21 +147,7 @@ class NewRainbowPolicy(C51Policy):
         return Batch(logits=logits, act=act, state=h)
 
     def learn(self, batch: Batch, **kwargs: Any) -> Dict[str, float]:
-        if self.noise_dim:
-            noise = hyper_layer_noise(self.batch_size, self.noise_dim * 2, self.noise_std)
-            Q_noise, V_noise = noise.split([self.noise_dim, self.noise_dim], dim=1)
-            self.model.Q.model.reset_noise(Q_noise)
-            self.model.V.model.reset_noise(V_noise)
-            self.model_old.Q.model.reset_noise(Q_noise)
-            self.model_old.V.model.reset_noise(V_noise)
-        else:
-            Q_eps_p, Q_eps_q = noisy_layer_noise(self.last_layer_inp_dim, self.q_out_dim)
-            V_eps_p, V_eps_q = noisy_layer_noise(self.last_layer_inp_dim, self.v_out_dim)
-            self.model.Q.model.reset_noise(Q_eps_p, Q_eps_q)
-            self.model.V.model.reset_noise(V_eps_p, V_eps_q)
-            self.model_old.Q.model.reset_noise(Q_eps_p, Q_eps_q)
-            self.model_old.V.model.reset_noise(V_eps_p, V_eps_q)
-
+        self.reset_noise(batch['obs'].shape[0], reset_target=True)
         if self._target and self._iter % self._freq == 0:
             self.sync_weight()
         self.optim.zero_grad()
@@ -187,3 +167,22 @@ class NewRainbowPolicy(C51Policy):
         self.optim.step()
         self._iter += 1
         return {"loss": loss.item()}
+
+    def reset_noise(self, batch_size: int = 1, reset_target: bool = True):
+        if self.noise_dim:
+            noise = hyper_layer_noise(batch_size, self.noise_dim * 2, self.noise_std)
+            Q_noise, V_noise = noise.split([self.noise_dim, self.noise_dim], dim=1)
+            self.model.Q.model.reset_noise(Q_noise)
+            self.model.V.model.reset_noise(V_noise)
+            if reset_target:
+                self.model_old.Q.model.reset_noise(Q_noise)
+                self.model_old.V.model.reset_noise(V_noise)
+        else:
+            Q_eps_p, Q_eps_q = noisy_layer_noise(self.last_layer_inp_dim, self.q_out_dim)
+            V_eps_p, V_eps_q = noisy_layer_noise(self.last_layer_inp_dim, self.v_out_dim)
+            self.model.Q.model.reset_noise(Q_eps_p, Q_eps_q)
+            self.model.V.model.reset_noise(V_eps_p, V_eps_q)
+            if reset_target:
+                self.model_old.Q.model.reset_noise(Q_eps_p, Q_eps_q)
+                self.model_old.V.model.reset_noise(V_eps_p, V_eps_q)
+

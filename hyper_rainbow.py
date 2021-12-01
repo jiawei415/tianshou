@@ -102,8 +102,9 @@ def get_args():
     parser.add_argument('--update-per-step', type=int, default=1)
     parser.add_argument('--batch-size', type=int, default=128)
     parser.add_argument('--hidden-sizes', type=int, nargs='*', default=[512, 512])
-    parser.add_argument('--training-num', type=int, default=1)
-    parser.add_argument('--test-num', type=int, default=100)
+    # parser.add_argument('--training-num', type=int, default=1)
+    # parser.add_argument('--testing-num', type=int, default=1)
+    parser.add_argument('--episode-per-test', type=int, default=10)
     parser.add_argument('--logdir', type=str, default='results')
     parser.add_argument('--render', type=float, default=0.)
     parser.add_argument('--norm-obs', action="store_true", default=True)
@@ -111,7 +112,7 @@ def get_args():
     parser.add_argument('--alpha', type=float, default=0.6)
     parser.add_argument('--beta', type=float, default=0.4)
     parser.add_argument('--beta-final', type=float, default=1.)
-    parser.add_argument('--action-select-scheme', type=str, default="episode", help="episode|step")
+    parser.add_argument('--action-select-scheme', type=str, default="step", help="episode|step")
     parser.add_argument('--resume', action="store_true", default=False)
     parser.add_argument('--resume-path', type=str, default='')
     parser.add_argument('--evaluation', action="store_true", default=False)
@@ -134,12 +135,9 @@ def run_hyper_rainbow(args=get_args()):
             size=args.size,
             seed=seed,
         )
-
-    if 'DeepSea' in args.task:
-        args.training_num = args.test_num = 1
     # you can also use tianshou.env.SubprocVectorEnv
-    train_envs = DummyVectorEnv([make_thunk(seed=args.seed + i) for i in range(args.training_num)], norm_obs=args.norm_obs)
-    test_envs = DummyVectorEnv([make_thunk(seed=args.seed + i) for i in range(args.test_num)], norm_obs=args.norm_obs)
+    train_envs = DummyVectorEnv([make_thunk(seed=args.seed)], norm_obs=args.norm_obs)
+    test_envs = DummyVectorEnv([make_thunk(seed=args.seed)], norm_obs=args.norm_obs)
     if 'DeepSea' in args.task:
         train_action_mappling = np.array([action_mapping() for action_mapping in train_envs.get_action_mapping])
         test_action_mappling = np.array([action_mapping() for action_mapping in test_envs.get_action_mapping])
@@ -167,11 +165,10 @@ def run_hyper_rainbow(args=get_args()):
         "device": args.device,
         "softmax": True,
         "num_atoms": args.num_atoms,
-        "noise_dim": args.noise_dim,
         "prior_std": args.prior_std,
         "dueling_param": ({ "linear_layer": last_linear}, {"linear_layer": last_linear})
     }
-    model = NewNet(**model_params)
+    model = NewNet(**model_params).to(args.device)
     # model.apply(init_module)
     # init_model(model)
     print(f"Network structure:\n{str(model)}")
@@ -198,8 +195,8 @@ def run_hyper_rainbow(args=get_args()):
         "target_update_freq": args.target_update_freq,
         "noise_std": args.noise_std,
         "noise_dim": args.noise_dim,
-        "batch_size": args.batch_size,
         "hyper_reg_coef": hyper_reg_coef,
+        "action_select_scheme": args.action_select_scheme,
     }
     policy = NewRainbowPolicy(**policy_params).to(args.device)
 
@@ -316,7 +313,7 @@ def run_hyper_rainbow(args=get_args()):
             print("Fail to restore buffer.")
 
     # trainer
-    args.step_per_collect *= args.training_num
+    # args.step_per_collect *= args.training_num
     args.update_per_step /= args.step_per_collect
     result = offpolicy_trainer(
         policy,
@@ -325,8 +322,8 @@ def run_hyper_rainbow(args=get_args()):
         args.epoch,
         args.step_per_epoch,
         args.step_per_collect,
-        args.test_num,
-        args.batch_size,
+        episode_per_test=args.episode_per_test,
+        batch_size=args.batch_size,
         update_per_step=args.update_per_step,
         train_fn=train_fn,
         test_fn=test_fn,

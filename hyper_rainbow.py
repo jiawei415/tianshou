@@ -152,11 +152,11 @@ def run_hyper_rainbow(args=get_args()):
     test_envs.seed(args.seed)
 
     # model
-    def last_linear(x, y):
+    def last_linear(x, y, device):
         if args.noise_dim:
-            return NewHyperLinear(x, y, noise_dim=args.noise_dim, prior_std=args.prior_std)
+            return NewHyperLinear(x, y, device, noise_dim=args.noise_dim, prior_std=args.prior_std)
         else:
-            return NewNoisyLinear(x, y, noisy_std=args.noisy_std, prior_std=args.prior_std)
+            return NewNoisyLinear(x, y, device, noisy_std=args.noisy_std, prior_std=args.prior_std)
 
     model_params = {
         "state_shape": args.state_shape,

@@ -138,7 +138,7 @@ class LastMLP(nn.Module):
         super().__init__()
         self.device = device
         self.output_dim = output_dim
-        self.model = linear_layer(input_dim, output_dim)
+        self.model = linear_layer(input_dim, output_dim, device)
 
     def forward(self, s: Union[np.ndarray, torch.Tensor], prior_s=None, noise: Dict[str, Any] = {}) -> torch.Tensor:
         if self.device is not None:

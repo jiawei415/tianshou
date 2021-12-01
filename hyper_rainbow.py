@@ -113,7 +113,7 @@ def get_args():
     parser.add_argument('--alpha', type=float, default=0.6)
     parser.add_argument('--beta', type=float, default=0.4)
     parser.add_argument('--beta-final', type=float, default=1.)
-    parser.add_argument('--action-select-scheme', type=str, default="step", help="episode|step")
+    parser.add_argument('--sample-per-step', action="store_true", default=True)
     parser.add_argument('--same-noise-update', action="store_true", default=True)
     parser.add_argument('--resume', action="store_true", default=False)
     parser.add_argument('--resume-path', type=str, default='')
@@ -198,7 +198,7 @@ def run_hyper_rainbow(args=get_args()):
         "noise_std": args.noise_std,
         "noise_dim": args.noise_dim,
         "hyper_reg_coef": hyper_reg_coef,
-        "action_select_scheme": args.action_select_scheme,
+        "sample_per_step": args.sample_per_step,
         "same_noise_update": args.same_noise_update,
         "reward_normalization": args.norm_ret,
     }

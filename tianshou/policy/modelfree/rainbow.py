@@ -89,7 +89,7 @@ class NewRainbowPolicy(C51Policy):
         hyper_reg_coef: float = 0.001,
         estimation_step: int = 1,
         target_update_freq: int = 0,
-        action_select_scheme: str = "step",
+        sample_per_step: bool = True,
         same_noise_update: bool = True,
         reward_normalization: bool = False,
         **kwargs: Any
@@ -104,7 +104,7 @@ class NewRainbowPolicy(C51Policy):
         self.noise_dim = noise_dim
         self.noise_std = noise_std
         self.hyper_reg_coef = hyper_reg_coef
-        self.action_select_scheme = action_select_scheme
+        self.sample_per_step = sample_per_step
         self.same_noise_update = same_noise_update
 
     def _target_dist(self, batch: Batch, noise: Dict[str, Any] = {}) -> torch.Tensor:
@@ -140,7 +140,7 @@ class NewRainbowPolicy(C51Policy):
         done = batch['done'][0] if len(batch['done'].shape) > 0 else True
         obs = batch[input]
         obs_ = obs.obs if hasattr(obs, "obs") else obs
-        if is_collecting and self.action_select_scheme == "step":
+        if is_collecting and self.sample_per_step:
             self.reset_noise(obs_.shape[0], reset=True)
         elif is_collecting and done:
             self.reset_noise(obs_.shape[0], reset=True)

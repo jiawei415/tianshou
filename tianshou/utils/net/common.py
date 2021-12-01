@@ -140,12 +140,12 @@ class LastMLP(nn.Module):
         self.output_dim = output_dim
         self.model = linear_layer(input_dim, output_dim)
 
-    def forward(self, s: Union[np.ndarray, torch.Tensor], prior_s=None) -> torch.Tensor:
+    def forward(self, s: Union[np.ndarray, torch.Tensor], prior_s=None, noise: Dict[str, Any] = {}) -> torch.Tensor:
         if self.device is not None:
             s = torch.as_tensor(s, device=self.device, dtype=torch.float32).flatten(1)
             if prior_s is not None:
                 prior_s = torch.as_tensor(prior_s, device=self.device, dtype=torch.float32).flatten(1)
-        return self.model(s, prior_s)  # type: ignore
+        return self.model(s, prior_s, noise)  # type: ignore
 
 
 class Net(nn.Module):
@@ -316,6 +316,7 @@ class NewNet(nn.Module):
         self,
         s: Union[np.ndarray, torch.Tensor],
         state: Any = None,
+        noise: Dict[str, Any] = {},
         info: Dict[str, Any] = {},
     ) -> Tuple[torch.Tensor, Any]:
         """Mapping: s -> flatten (inside MLP)-> logits."""
@@ -323,7 +324,7 @@ class NewNet(nn.Module):
         prior_logits = self.priormodel(s) if self.prior_std else None
         bsz = logits.shape[0]
         if self.use_dueling:  # Dueling DQN
-            q, v = self.Q(logits, prior_logits), self.V(logits, prior_logits)
+            q, v = self.Q(logits, prior_logits, noise['Q']), self.V(logits, prior_logits, noise['V'])
             if self.num_atoms > 1:
                 q = q.view(bsz, -1, self.num_atoms)
                 v = v.view(bsz, -1, self.num_atoms)

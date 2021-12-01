@@ -104,12 +104,12 @@ class NewRainbowPolicy(C51Policy):
         self.hyper_reg_coef = hyper_reg_coef
         self.action_select_scheme = action_select_scheme
 
-    def _target_dist(self, batch: Batch) -> torch.Tensor:
+    def _target_dist(self, batch: Batch, noise: Dict[str, Any] = {}) -> torch.Tensor:
         if self._target:
-            a = self(batch, input="obs_next", is_collecting=False).act
-            next_dist = self(batch, model="model_old", input="obs_next", is_collecting=False).logits
+            a = self(batch, input="obs_next", is_collecting=False, noise=noise).act
+            next_dist = self(batch, model="model_old", input="obs_next", is_collecting=False, noise=noise).logits
         else:
-            next_b = self(batch, input="obs_next", is_collecting=False)
+            next_b = self(batch, input="obs_next", is_collecting=False, noise=noise)
             a = next_b.act
             next_dist = next_b.logits
         next_dist = next_dist[np.arange(len(a)), a, :]
@@ -128,6 +128,7 @@ class NewRainbowPolicy(C51Policy):
         state: Optional[Union[dict, Batch, np.ndarray]] = None,
         model: str = "model",
         input: str = "obs",
+        noise: Dict[str, Any] = {},
         is_collecting: bool = True,
         **kwargs: Any
     ) -> Batch:
@@ -135,11 +136,13 @@ class NewRainbowPolicy(C51Policy):
         obs = batch[input]
         obs_ = obs.obs if hasattr(obs, "obs") else obs
         if is_collecting and self.action_select_scheme == "step":
-            self.reset_noise(obs_.shape[0], reset_target=False)
+            self.reset_noise(obs_.shape[0])
         elif is_collecting and done:
-            self.reset_noise(obs_.shape[0], reset_target=False)
+            self.reset_noise(obs_.shape[0])
+        if len(noise) == 0:
+            noise = {'Q': {}, 'V':{}}
         model = getattr(self, model)
-        logits, h = model(obs_, state=state, info=batch.info)
+        logits, h = model(obs_, state=state, info=batch.info, noise=noise)
         q = self.compute_q_value(logits, getattr(obs, "mask", None))
         if not hasattr(self, "max_action_num"):
             self.max_action_num = q.shape[1]
@@ -147,20 +150,20 @@ class NewRainbowPolicy(C51Policy):
         return Batch(logits=logits, act=act, state=h)
 
     def learn(self, batch: Batch, **kwargs: Any) -> Dict[str, float]:
-        self.reset_noise(batch['obs'].shape[0], reset_target=True)
+        noise = self.reset_noise(batch['obs'].shape[0], reset=False)
         if self._target and self._iter % self._freq == 0:
             self.sync_weight()
         self.optim.zero_grad()
         with torch.no_grad():
-            target_dist = self._target_dist(batch)
+            target_dist = self._target_dist(batch, noise)
         weight = batch.pop("weight", 1.0)
-        curr_dist = self(batch, is_collecting=False).logits
+        curr_dist = self(batch, is_collecting=False, noise=noise).logits
         act = batch.act
         curr_dist = curr_dist[np.arange(len(act)), act, :]
         cross_entropy = -(target_dist * torch.log(curr_dist + 1e-8)).sum(1)
         loss = (cross_entropy * weight).mean()
         if self.hyper_reg_coef and self.noise_dim:
-            reg_loss = self.model.Q.model.regularization() + self.model.V.model.regularization()
+            reg_loss = self.model.Q.model.regularization(noise['Q']) + self.model.V.model.regularization(noise['V'])
             loss += reg_loss * (self.hyper_reg_coef / kwargs['sample_num'])
         batch.weight = cross_entropy.detach()  # prio-buffer
         loss.backward()
@@ -168,21 +171,17 @@ class NewRainbowPolicy(C51Policy):
         self._iter += 1
         return {"loss": loss.item()}
 
-    def reset_noise(self, batch_size: int = 1, reset_target: bool = True):
+    def reset_noise(self, batch_size: int = 1, reset: bool = True):
         if self.noise_dim:
-            noise = hyper_layer_noise(batch_size, self.noise_dim * 2, self.noise_std)
-            Q_noise, V_noise = noise.split([self.noise_dim, self.noise_dim], dim=1)
-            self.model.Q.model.reset_noise(Q_noise)
-            self.model.V.model.reset_noise(V_noise)
-            if reset_target:
-                self.model_old.Q.model.reset_noise(Q_noise)
-                self.model_old.V.model.reset_noise(V_noise)
+            hyper_noise = hyper_layer_noise(batch_size, self.noise_dim * 2, self.noise_std)
+            Q_noise, V_noise = hyper_noise.split([self.noise_dim, self.noise_dim], dim=1)
+            noise = {'Q': {'hyper_noise': Q_noise}, 'V': {'hyper_noise': V_noise}}
         else:
             Q_eps_p, Q_eps_q = noisy_layer_noise(self.last_layer_inp_dim, self.q_out_dim)
             V_eps_p, V_eps_q = noisy_layer_noise(self.last_layer_inp_dim, self.v_out_dim)
-            self.model.Q.model.reset_noise(Q_eps_p, Q_eps_q)
-            self.model.V.model.reset_noise(V_eps_p, V_eps_q)
-            if reset_target:
-                self.model_old.Q.model.reset_noise(Q_eps_p, Q_eps_q)
-                self.model_old.V.model.reset_noise(V_eps_p, V_eps_q)
+            noise = {'Q': {'eps_p': Q_eps_p, 'eps_q': Q_eps_q}, 'V': {'eps_p': V_eps_p, 'eps_q': V_eps_q}}
+        if reset:
+            self.model.Q.model.reset_noise(noise['Q'])
+            self.model.V.model.reset_noise(noise['V'])
+        return noise
 

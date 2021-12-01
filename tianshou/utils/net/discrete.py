@@ -632,9 +632,9 @@ class NewNoisyLinear(nn.Module):
 
         self.init_params()
 
-    def reset_noise(self, eps_p, eps_q):
-        self.eps_p = eps_p.to(self.mu_W.device)
-        self.eps_q = eps_q.to(self.mu_W.device)
+    def reset_noise(self, noise):
+        self.eps_p = noise['eps_p'].to(self.mu_W.device)
+        self.eps_q = noise['eps_q'].to(self.mu_W.device)
 
     def init_params(self) -> None:
         bound = 1 / np.sqrt(self.in_features)
@@ -643,12 +643,14 @@ class NewNoisyLinear(nn.Module):
         self.sigma_W.data.fill_(self.sigma / np.sqrt(self.in_features))
         self.sigma_bias.data.fill_(self.sigma / np.sqrt(self.in_features))
 
-    def forward(self, x: torch.Tensor, prior_x=None) -> torch.Tensor:
-        weight = self.mu_W + self.sigma_W * (self.eps_q.ger(self.eps_p))
-        bias = self.mu_bias + self.sigma_bias * self.eps_q.clone()
+    def forward(self, x: torch.Tensor, prior_x=None, noise: Dict[str, Any] = {}) -> torch.Tensor:
+        eps_q = noise.get("eps_q", self.eps_q).to(self.mu_W.device)
+        eps_p = noise.get("eps_p", self.eps_p).to(self.mu_W.device)
+        weight = self.mu_W + self.sigma_W * (eps_q.ger(eps_p))
+        bias = self.mu_bias + self.sigma_bias * eps_q.clone()
         out =  F.linear(x, weight, bias)
         if prior_x is not None and self.prior_std > 0:
-            prior_out = self.priormodel(prior_x, self.eps_p, self.eps_q)
+            prior_out = self.priormodel(prior_x, eps_p, eps_q)
             out += prior_out
         return out
 
@@ -671,7 +673,7 @@ class NewHyperLinear(nn.Module):
         if prior_std > 0:
             self.priormodel = PriorHyperLinear(inp_dim, out_dim, prior_std=prior_std)
 
-        self.noise = None
+        self.hyper_noise = None
         self.noise_dim = noise_dim
         self.prior_std = prior_std
         self.splited_size = [in_features * out_features, out_features]
@@ -679,7 +681,7 @@ class NewHyperLinear(nn.Module):
         self.bias_shape = (1, out_features)
 
     def reset_noise(self, noise):
-        self.noise = noise.to(self.hypermodel.weight.device)
+        self.hyper_noise = noise['hyper_noise'].to(self.hypermodel.weight.device)
 
     def base_forward(self, x: torch.Tensor, params: torch.Tensor):
         weight, bias = params.split(self.splited_size, dim=1)
@@ -689,17 +691,19 @@ class NewHyperLinear(nn.Module):
         out = torch.bmm(x, weight) + bias
         return out.squeeze()
 
-    def forward(self, x: torch.Tensor, prior_x=None) -> torch.Tensor:
-        params = self.hypermodel(self.noise)
+    def forward(self, x: torch.Tensor, prior_x=None, noise: Dict[str, Any]={}) -> torch.Tensor:
+        hyper_noise = noise.get('hyper_noise', self.hyper_noise).to(self.hypermodel.weight.device)
+        params = self.hypermodel(hyper_noise)
         out = self.base_forward(x, params)
         if prior_x is not None and self.prior_std > 0:
-            prior_params = self.priormodel(self.noise)
+            prior_params = self.priormodel(hyper_noise)
             prior_out = self.base_forward(prior_x, prior_params)
             out += prior_out
         return out
 
-    def regularization(self, p: int = 2) -> torch.Tensor:
-        params = self.hypermodel(self.noise)
+    def regularization(self, noise: Dict[str, Any]={}, p: int = 2) -> torch.Tensor:
+        hyper_noise = noise['hyper_noise'].to(self.hypermodel.weight.device)
+        params = self.hypermodel(hyper_noise)
         reg_loss = torch.norm(params, dim=1, p=p).square()
         return reg_loss.mean()
 

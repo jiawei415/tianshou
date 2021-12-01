@@ -108,6 +108,7 @@ def get_args():
     parser.add_argument('--logdir', type=str, default='results')
     parser.add_argument('--render', type=float, default=0.)
     parser.add_argument('--norm-obs', action="store_true", default=True)
+    parser.add_argument('--norm-ret', action="store_true", default=False)
     parser.add_argument('--prioritized', action="store_true", default=False)
     parser.add_argument('--alpha', type=float, default=0.6)
     parser.add_argument('--beta', type=float, default=0.4)
@@ -199,6 +200,7 @@ def run_hyper_rainbow(args=get_args()):
         "hyper_reg_coef": hyper_reg_coef,
         "action_select_scheme": args.action_select_scheme,
         "same_noise_update": args.same_noise_update,
+        "reward_normalization": args.norm_ret,
     }
     policy = NewRainbowPolicy(**policy_params).to(args.device)
 

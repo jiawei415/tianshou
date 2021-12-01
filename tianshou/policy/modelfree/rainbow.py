@@ -4,6 +4,7 @@ from typing import Any, Dict, Optional, Union
 
 
 from tianshou.data import Batch, to_numpy
+from tianshou.data.utils.converter import to_torch
 from tianshou.policy import C51Policy, HyperC51Policy
 from tianshou.utils.net.discrete import sample_noise, noisy_layer_noise, hyper_layer_noise
 
@@ -89,6 +90,7 @@ class NewRainbowPolicy(C51Policy):
         estimation_step: int = 1,
         target_update_freq: int = 0,
         action_select_scheme: str = "step",
+        same_noise_update: bool = True,
         reward_normalization: bool = False,
         **kwargs: Any
     ) -> None:
@@ -103,13 +105,16 @@ class NewRainbowPolicy(C51Policy):
         self.noise_std = noise_std
         self.hyper_reg_coef = hyper_reg_coef
         self.action_select_scheme = action_select_scheme
+        self.same_noise_update = same_noise_update
 
     def _target_dist(self, batch: Batch, noise: Dict[str, Any] = {}) -> torch.Tensor:
+        main_noise  = noise if self.same_noise_update else self.reset_noise(batch['obs'].shape[0], reset=False)
+        target_noise = noise if self.same_noise_update else self.reset_noise(batch['obs'].shape[0], reset=False)
         if self._target:
-            a = self(batch, input="obs_next", is_collecting=False, noise=noise).act
-            next_dist = self(batch, model="model_old", input="obs_next", is_collecting=False, noise=noise).logits
+            a = self(batch, input="obs_next", is_collecting=False, noise=main_noise).act
+            next_dist = self(batch, model="model_old", input="obs_next", is_collecting=False, noise=target_noise).logits
         else:
-            next_b = self(batch, input="obs_next", is_collecting=False, noise=noise)
+            next_b = self(batch, input="obs_next", is_collecting=False, noise=main_noise)
             a = next_b.act
             next_dist = next_b.logits
         next_dist = next_dist[np.arange(len(a)), a, :]
@@ -136,9 +141,9 @@ class NewRainbowPolicy(C51Policy):
         obs = batch[input]
         obs_ = obs.obs if hasattr(obs, "obs") else obs
         if is_collecting and self.action_select_scheme == "step":
-            self.reset_noise(obs_.shape[0])
+            self.reset_noise(obs_.shape[0], reset=True)
         elif is_collecting and done:
-            self.reset_noise(obs_.shape[0])
+            self.reset_noise(obs_.shape[0], reset=True)
         if len(noise) == 0:
             noise = {'Q': {}, 'V':{}}
         model = getattr(self, model)

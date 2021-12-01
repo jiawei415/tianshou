@@ -12,11 +12,11 @@ from torch.utils.tensorboard import SummaryWriter
 
 from tianshou.data import Collector, PrioritizedVectorReplayBuffer, VectorReplayBuffer
 from tianshou.env import DummyVectorEnv
-from tianshou.policy import RainbowPolicy, HyperRainbowPolicy
+from tianshou.policy import NewRainbowPolicy
 from tianshou.trainer import offpolicy_trainer
 from tianshou.utils import TensorboardLogger
-from tianshou.utils.net.common import NetWithPrior, HyperNetWithPrior
-from tianshou.utils.net.discrete import NoisyLinearWithPrior, HyperLinearWithPrior
+from tianshou.utils.net.common import NewNet
+from tianshou.utils.net.discrete import NewNoisyLinear, NewHyperLinear
 
 def init_model(model, method='uniform', bias=0.):
     if method == 'xavier':
@@ -68,8 +68,8 @@ def make_env(env_name, max_step=None, noise_dim=0, size=10, seed=2021):
     env = gym.make(env_name, **env_config)
     if max_step is not None:
         env._max_episode_steps = max_step
-    if noise_dim:
-        env = NoiseWrapper(env, noise_dim=noise_dim)
+    # if noise_dim:
+    #     env = NoiseWrapper(env, noise_dim=noise_dim)
     return env
 
 
@@ -89,7 +89,6 @@ def get_args():
     parser.add_argument('--base-weight-decay', type=float, default=0.0003125)
     parser.add_argument('--gamma', type=float, default=0.99)
     parser.add_argument('--num-atoms', type=int, default=51)
-    # parser.add_argument('--v-min', type=float, default=-100.)
     parser.add_argument('--v-max', type=float, default=100.)
     parser.add_argument('--prior-std', type=float, default=0.)
     parser.add_argument('--noise-std', type=float, default=1.)
@@ -108,10 +107,11 @@ def get_args():
     parser.add_argument('--logdir', type=str, default='results')
     parser.add_argument('--render', type=float, default=0.)
     parser.add_argument('--norm-obs', action="store_true", default=True)
-    parser.add_argument('--prioritized', action="store_true", default=True)
+    parser.add_argument('--prioritized', action="store_true", default=False)
     parser.add_argument('--alpha', type=float, default=0.6)
     parser.add_argument('--beta', type=float, default=0.4)
     parser.add_argument('--beta-final', type=float, default=1.)
+    parser.add_argument('--action-select-scheme', type=str, default="episode", help="episode|step")
     parser.add_argument('--resume', action="store_true", default=False)
     parser.add_argument('--resume-path', type=str, default='')
     parser.add_argument('--evaluation', action="store_true", default=False)
@@ -156,9 +156,9 @@ def run_hyper_rainbow(args=get_args()):
     # model
     def last_linear(x, y):
         if args.noise_dim:
-            return HyperLinearWithPrior(x, y, noize_dim=args.noise_dim, prior_std=args.prior_std)
+            return NewHyperLinear(x, y, noise_dim=args.noise_dim, prior_std=args.prior_std)
         else:
-            return NoisyLinearWithPrior(x, y, noisy_std=args.noisy_std, prior_std=args.prior_std)
+            return NewNoisyLinear(x, y, noisy_std=args.noisy_std, prior_std=args.prior_std)
 
     model_params = {
         "state_shape": args.state_shape,
@@ -167,14 +167,11 @@ def run_hyper_rainbow(args=get_args()):
         "device": args.device,
         "softmax": True,
         "num_atoms": args.num_atoms,
+        "noise_dim": args.noise_dim,
         "prior_std": args.prior_std,
         "dueling_param": ({ "linear_layer": last_linear}, {"linear_layer": last_linear})
     }
-    if args.noise_dim:
-        model_params.update({"noise_dim": args.noise_dim,})
-        model = HyperNetWithPrior(**model_params)
-    else:
-        model = NetWithPrior(**model_params)
+    model = NewNet(**model_params)
     # model.apply(init_module)
     # init_model(model)
     print(f"Network structure:\n{str(model)}")
@@ -189,6 +186,7 @@ def run_hyper_rainbow(args=get_args()):
     optim = torch.optim.Adam(trainable_params, lr=args.lr)
 
     # policy
+    hyper_reg_coef = args.hyper_reg_coef / (args.prior_std ** 2) if args.prior_std else args.hyper_reg_coef
     policy_params = {
         "model": model,
         "optim": optim,
@@ -197,20 +195,13 @@ def run_hyper_rainbow(args=get_args()):
         "v_min": -args.v_max,
         "v_max": args.v_max,
         "estimation_step": args.n_step,
-        "target_update_freq": args.target_update_freq
+        "target_update_freq": args.target_update_freq,
+        "noise_std": args.noise_std,
+        "noise_dim": args.noise_dim,
+        "batch_size": args.batch_size,
+        "hyper_reg_coef": hyper_reg_coef,
     }
-    if args.noise_dim:
-        hyper_reg_coef = args.hyper_reg_coef / (args.prior_std ** 2) if args.prior_std else args.hyper_reg_coef
-        policy_params.update(
-            {
-                "noise_std": args.noise_std,
-                "noise_dim": args.noise_dim,
-                "hyper_reg_coef": hyper_reg_coef,
-            }
-        )
-        policy = HyperRainbowPolicy(**policy_params).to(args.device)
-    else:
-        policy = RainbowPolicy(**policy_params).to(args.device)
+    policy = NewRainbowPolicy(**policy_params).to(args.device)
 
     if args.evaluation:
         policy_name = f"{args.task[:-3].lower()}_{args.seed}_{args.policy_path}"

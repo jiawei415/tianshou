@@ -96,6 +96,7 @@ def get_args():
     parser.add_argument('--beta-final', type=float, default=1.)
     parser.add_argument('--sample-per-step', action="store_true", default=False)
     parser.add_argument('--same-noise-update', action="store_true", default=True)
+    parser.add_argument('--batch-noise', action="store_true", default=True)
     parser.add_argument('--resume', action="store_true", default=False)
     parser.add_argument('--resume-path', type=str, default='')
     parser.add_argument('--evaluation', action="store_true", default=False)
@@ -134,11 +135,18 @@ def run_hyper_rainbow(args=get_args()):
     test_envs.seed(args.seed)
 
     # model
-    def last_linear(x, y, device):
+    last_linear_params = {
+        "device": args.device,
+        "prior_std": args.prior_std,
+        "batch_noise": args.batch_noise,
+    }
+    def last_linear(x, y):
         if args.noise_dim:
-            return NewHyperLinear(x, y, device, noise_dim=args.noise_dim, prior_std=args.prior_std)
+            last_linear_params.update({"noise_dim": args.noise_dim,})
+            return NewHyperLinear(x, y, **last_linear_params)
         else:
-            return NewNoisyLinear(x, y, device, noisy_std=args.noisy_std, prior_std=args.prior_std)
+            last_linear_params.update({"noisy_std": args.noisy_std,})
+            return NewNoisyLinear(x, y, **last_linear_params)
 
     model_params = {
         "state_shape": args.state_shape,
@@ -180,6 +188,7 @@ def run_hyper_rainbow(args=get_args()):
         "hyper_reg_coef": hyper_reg_coef,
         "sample_per_step": args.sample_per_step,
         "same_noise_update": args.same_noise_update,
+        "batch_noise": args.batch_noise,
         "reward_normalization": args.norm_ret,
     }
     policy = NewRainbowPolicy(**policy_params).to(args.device)

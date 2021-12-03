@@ -91,6 +91,7 @@ class NewRainbowPolicy(C51Policy):
         target_update_freq: int = 0,
         sample_per_step: bool = True,
         same_noise_update: bool = True,
+        batch_noise: bool = True,
         reward_normalization: bool = False,
         **kwargs: Any
     ) -> None:
@@ -106,6 +107,7 @@ class NewRainbowPolicy(C51Policy):
         self.hyper_reg_coef = hyper_reg_coef
         self.sample_per_step = sample_per_step
         self.same_noise_update = same_noise_update
+        self.batch_noise = batch_noise
 
     def _target_dist(self, batch: Batch, noise: Dict[str, Any] = {}) -> torch.Tensor:
         main_noise  = noise if self.same_noise_update else self.reset_noise(batch['obs'].shape[0], reset=False)
@@ -155,7 +157,8 @@ class NewRainbowPolicy(C51Policy):
         return Batch(logits=logits, act=act, state=h)
 
     def learn(self, batch: Batch, **kwargs: Any) -> Dict[str, float]:
-        noise = self.reset_noise(batch['obs'].shape[0], reset=False)
+        batch_size = batch['obs'].shape[0] if self.batch_noise else 1
+        noise = self.reset_noise(batch_size, reset=False)
         if self._target and self._iter % self._freq == 0:
             self.sync_weight()
         self.optim.zero_grad()

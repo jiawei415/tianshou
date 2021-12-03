@@ -615,6 +615,7 @@ class NewNoisyLinear(nn.Module):
         device: Optional[Union[str, int, torch.device]],
         noisy_std: float,
         prior_std: float = 1.,
+        **kwargs,
     ) -> None:
         super().__init__()
 
@@ -674,6 +675,8 @@ class NewHyperLinear(nn.Module):
         device: Optional[Union[str, int, torch.device]],
         noise_dim: int,
         prior_std: float = 1.,
+        batch_noise: bool = True,
+        **kwargs,
     ) -> None:
         super().__init__()
 
@@ -684,24 +687,33 @@ class NewHyperLinear(nn.Module):
         if prior_std > 0:
             self.priormodel = PriorHyperLinear(inp_dim, out_dim, prior_std=prior_std)
 
+        self.base_forward = getattr(self, "base_forward_v1") if batch_noise else getattr(self, "base_forward_v2")
+
         self.hyper_noise = None
         self.device = device
         self.noise_dim = noise_dim
         self.prior_std = prior_std
         self.splited_size = [in_features * out_features, out_features]
-        self.weight_shape = (in_features, out_features)
-        self.bias_shape = (1, out_features)
+        self.weight_shape = (in_features, out_features) if batch_noise else (out_features, in_features)
+        self.bias_shape = (1, out_features) if batch_noise else (out_features,)
 
     def reset_noise(self, noise):
         self.hyper_noise = noise['hyper_noise'].to(self.device)
 
-    def base_forward(self, x: torch.Tensor, params: torch.Tensor):
+    def base_forward_v1(self, x: torch.Tensor, params: torch.Tensor):
         weight, bias = params.split(self.splited_size, dim=1)
         weight = weight.reshape((-1,) + self.weight_shape)
         bias = bias.reshape((-1,) + self.bias_shape)
         x = x.unsqueeze(dim=1)
         out = torch.bmm(x, weight) + bias
         return out.squeeze()
+
+    def base_forward_v2(self, x: torch.Tensor, params: torch.Tensor):
+        weight, bias = params.split(self.splited_size, dim=1)
+        weight = weight.reshape((-1,) + self.weight_shape).squeeze()
+        bias = bias.reshape((-1,) + self.bias_shape).squeeze()
+        out = F.linear(x, weight, bias)
+        return out
 
     def forward(self, x: torch.Tensor, prior_x=None, noise: Dict[str, Any]={}) -> torch.Tensor:
         hyper_noise = noise.get('hyper_noise', self.hyper_noise).to(self.device)

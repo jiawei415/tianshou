@@ -607,6 +607,63 @@ class PriorHyperLinear(torch.nn.Module):
         )
 
 
+class NewPriorNoisyLinear(nn.Module):
+    def __init__(
+        self,
+        in_features: int,
+        out_features: int,
+        noisy_std: float,
+        batch_noise: bool = False,
+    ) -> None:
+        super().__init__()
+
+        # Learnable parameters.
+        weight_shape = (in_features, out_features) if batch_noise else (out_features, in_features)
+        bias_shape = (1, out_features) if batch_noise else (out_features, )
+        self.mu_W = nn.Parameter(torch.FloatTensor(size=weight_shape))
+        self.sigma_W = nn.Parameter(torch.FloatTensor(size=weight_shape))
+        self.mu_bias = nn.Parameter(torch.FloatTensor(size=bias_shape))
+        self.sigma_bias = nn.Parameter(torch.FloatTensor(size=bias_shape))
+
+        self.base_forward = getattr(self, "base_forward_v1") if batch_noise else getattr(self, "base_forward_v2")
+
+        # Factorized noise.
+        self.in_features = in_features
+        self.out_features = out_features
+        self.sigma = noisy_std
+
+        self.init_params()
+
+    def init_params(self) -> None:
+        bound = 1 / np.sqrt(self.in_features)
+        self.mu_W.data.uniform_(-bound, bound)
+        self.mu_bias.data.uniform_(-bound, bound)
+        self.sigma_W.data.fill_(self.sigma / np.sqrt(self.in_features))
+        self.sigma_bias.data.fill_(self.sigma / np.sqrt(self.in_features))
+
+    def base_forward_v1(self, x, eps_p, eps_q):
+        weight = self.mu_W + self.sigma_W * torch.bmm(eps_p.unsqueeze(dim=-1), eps_q.unsqueeze(dim=1))
+        bias = self.mu_bias + self.sigma_bias * eps_q.unsqueeze(dim=1)
+        x = x.unsqueeze(dim=1)
+        out = torch.bmm(x, weight) + bias
+        return out.squeeze()
+
+    def base_forward_v2(self, x, eps_p, eps_q):
+        weight = self.mu_W + self.sigma_W * torch.multiply(eps_q.T, eps_p)
+        bias = self.mu_bias + self.sigma_bias * eps_q.squeeze()
+        out =  F.linear(x, weight, bias)
+        return out
+
+    def forward(self, x: torch.Tensor, eps_p: torch.Tensor, eps_q: torch.Tensor) -> torch.Tensor:
+        out = self.base_forward(x, eps_p, eps_q)
+        return out
+
+    def extra_repr(self):
+        return 'in_features={}, out_features={}, bias={}'.format(
+            self.in_features, self.out_features, not np.all(self.mu_bias.cpu().detach().numpy() == 0)
+        )
+
+
 class NewNoisyLinear(nn.Module):
     def __init__(
         self,
@@ -615,18 +672,23 @@ class NewNoisyLinear(nn.Module):
         device: Optional[Union[str, int, torch.device]],
         noisy_std: float,
         prior_std: float = 1.,
+        batch_noise: bool = False,
         **kwargs,
     ) -> None:
         super().__init__()
 
         # Learnable parameters.
-        self.mu_W = nn.Parameter(torch.FloatTensor(out_features, in_features))
-        self.sigma_W = nn.Parameter(torch.FloatTensor(out_features, in_features))
-        self.mu_bias = nn.Parameter(torch.FloatTensor(out_features))
-        self.sigma_bias = nn.Parameter(torch.FloatTensor(out_features))
+        weight_shape = (in_features, out_features) if batch_noise else (out_features, in_features)
+        bias_shape = (1, out_features) if batch_noise else (out_features, )
+        self.mu_W = nn.Parameter(torch.FloatTensor(size=weight_shape))
+        self.sigma_W = nn.Parameter(torch.FloatTensor(size=weight_shape))
+        self.mu_bias = nn.Parameter(torch.FloatTensor(size=bias_shape))
+        self.sigma_bias = nn.Parameter(torch.FloatTensor(size=bias_shape))
 
         if prior_std:
-            self.priormodel = PriorNoisyLinear(in_features, out_features, noisy_std=noisy_std, prior_std=prior_std)
+            self.priormodel = NewPriorNoisyLinear(in_features, out_features, noisy_std=noisy_std, batch_noise=batch_noise)
+
+        self.base_forward = getattr(self, "base_forward_v1") if batch_noise else getattr(self, "base_forward_v2")
 
         # Factorized noise.
         self.eps_p = None
@@ -650,14 +712,25 @@ class NewNoisyLinear(nn.Module):
         self.sigma_W.data.fill_(self.sigma / np.sqrt(self.in_features))
         self.sigma_bias.data.fill_(self.sigma / np.sqrt(self.in_features))
 
+    def base_forward_v1(self, x, eps_p, eps_q):
+        weight = self.mu_W + self.sigma_W * torch.bmm(eps_p.unsqueeze(dim=-1), eps_q.unsqueeze(dim=1))
+        bias = self.mu_bias + self.sigma_bias * eps_q.unsqueeze(dim=1)
+        x = x.unsqueeze(dim=1)
+        out = torch.bmm(x, weight) + bias
+        return out.squeeze()
+
+    def base_forward_v2(self, x, eps_p, eps_q):
+        weight = self.mu_W + self.sigma_W * torch.multiply(eps_q.T, eps_p)
+        bias = self.mu_bias + self.sigma_bias * eps_q.squeeze()
+        out =  F.linear(x, weight, bias)
+        return out
+
     def forward(self, x: torch.Tensor, prior_x=None, noise: Dict[str, Any] = {}) -> torch.Tensor:
         eps_q = noise.get("eps_q", self.eps_q).to(self.device)
         eps_p = noise.get("eps_p", self.eps_p).to(self.device)
-        weight = self.mu_W + self.sigma_W * (eps_q.ger(eps_p))
-        bias = self.mu_bias + self.sigma_bias * eps_q.clone()
-        out =  F.linear(x, weight, bias)
+        out = self.base_forward(x, eps_p.clone(), eps_q.clone())
         if prior_x is not None and self.prior_std > 0:
-            prior_out = self.priormodel(prior_x, eps_p, eps_q)
+            prior_out = self.priormodel(prior_x, eps_p.clone(), eps_q.clone())
             out += prior_out
         return out
 
@@ -732,11 +805,11 @@ class NewHyperLinear(nn.Module):
         return reg_loss.mean()
 
 
-def noisy_layer_noise(inp_dim, out_dim):
+def noisy_layer_noise(batch, inp_dim, out_dim):
     def f(x):
         return x.sign().mul_(x.abs().sqrt_())
-    eps_p = f(torch.randn(inp_dim))
-    eps_q = f(torch.randn(out_dim))
+    eps_p = f(torch.randn(size=(batch, inp_dim)))
+    eps_q = f(torch.randn(size=(batch, out_dim)))
     return eps_p, eps_q
 
 

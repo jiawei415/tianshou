@@ -185,8 +185,8 @@ class NewRainbowPolicy(C51Policy):
             Q_noise, V_noise = hyper_noise.split([self.noise_dim, self.noise_dim], dim=1)
             noise = {'Q': {'hyper_noise': Q_noise}, 'V': {'hyper_noise': V_noise}}
         else:
-            Q_eps_p, Q_eps_q = noisy_layer_noise(self.last_layer_inp_dim, self.q_out_dim)
-            V_eps_p, V_eps_q = noisy_layer_noise(self.last_layer_inp_dim, self.v_out_dim)
+            Q_eps_p, Q_eps_q = noisy_layer_noise(batch_size, self.last_layer_inp_dim, self.q_out_dim)
+            V_eps_p, V_eps_q = noisy_layer_noise(batch_size, self.last_layer_inp_dim, self.v_out_dim)
             noise = {'Q': {'eps_p': Q_eps_p, 'eps_q': Q_eps_q}, 'V': {'eps_p': V_eps_p, 'eps_q': V_eps_q}}
         if reset:
             self.model.Q.model.reset_noise(noise['Q'])

@@ -12,6 +12,7 @@ from torch.utils.tensorboard import SummaryWriter
 
 from tianshou.data import Collector, PrioritizedVectorReplayBuffer, VectorReplayBuffer
 from tianshou.env import DummyVectorEnv
+from tianshou.env.utils import NoiseWrapper
 from tianshou.policy import NewRainbowPolicy
 from tianshou.trainer import offpolicy_trainer
 from tianshou.utils import TensorboardLogger
@@ -45,31 +46,11 @@ def init_module(module, method='uniform', bias=0.):
         nn.init.constant(module.bias, bias)
 
 
-class NoiseWrapper(gym.Wrapper):
-    def __init__(self, env, noise_dim, noise_std=1.):
-        super().__init__(env)
-        assert noise_dim > 0
-        self.env = env
-        self.noise_dim = noise_dim
-        self.noise_std = noise_std
-
-    def reset(self):
-        state = self.env.reset()
-        self.now_noise = np.random.normal(0, 1, self.noise_dim) * self.noise_std
-        return np.hstack([self.now_noise, state])
-
-    def step(self, action):
-        state, reward, done, info = self.env.step(action)
-        return np.hstack([self.now_noise, state]), reward, done, info
-
-
-def make_env(env_name, max_step=None, noise_dim=0, size=10, seed=2021):
+def make_env(env_name, max_step=None, size=10, seed=2021):
     env_config = {'size': size, 'seed':seed, 'mapping_seed': seed} if 'DeepSea' in env_name else {}
     env = gym.make(env_name, **env_config)
     if max_step is not None:
         env._max_episode_steps = max_step
-    # if noise_dim:
-    #     env = NoiseWrapper(env, noise_dim=noise_dim)
     return env
 
 
@@ -113,7 +94,7 @@ def get_args():
     parser.add_argument('--alpha', type=float, default=0.6)
     parser.add_argument('--beta', type=float, default=0.4)
     parser.add_argument('--beta-final', type=float, default=1.)
-    parser.add_argument('--sample-per-step', action="store_true", default=True)
+    parser.add_argument('--sample-per-step', action="store_true", default=False)
     parser.add_argument('--same-noise-update', action="store_true", default=True)
     parser.add_argument('--resume', action="store_true", default=False)
     parser.add_argument('--resume-path', type=str, default='')
@@ -133,7 +114,6 @@ def run_hyper_rainbow(args=get_args()):
         return lambda: make_env(
             env_name=args.task,
             max_step=args.max_step,
-            noise_dim=args.noise_dim,
             size=args.size,
             seed=seed,
         )
@@ -179,7 +159,7 @@ def run_hyper_rainbow(args=get_args()):
     if args.hyper_reg_coef:
         args.hyper_weight_decay = 0
     trainable_params = [
-            {'params': (p for name, p in model.named_parameters() if 'priormodel' not in name and 'hypermodel' not in name),'weight_decay': args.base_weight_decay},
+            {'params': (p for name, p in model.named_parameters() if 'priormodel' not in name and 'hypermodel' not in name), 'weight_decay': args.base_weight_decay},
             {'params': (p for name, p in model.named_parameters() if 'priormodel' not in name and 'hypermodel' in name), 'weight_decay': args.hyper_weight_decay},
         ]
     optim = torch.optim.Adam(trainable_params, lr=args.lr)

@@ -71,6 +71,7 @@ def get_args():
     parser.add_argument('--gamma', type=float, default=0.99)
     parser.add_argument('--num-atoms', type=int, default=51)
     parser.add_argument('--v-max', type=float, default=100.)
+    parser.add_argument('--target-noise-std', type=float, default=0.)
     parser.add_argument('--prior-std', type=float, default=0.)
     parser.add_argument('--noise-std', type=float, default=1.)
     parser.add_argument('--noise-dim', type=int, default=0)
@@ -180,6 +181,7 @@ def run_hyper_rainbow(args=get_args()):
         "hyper_reg_coef": hyper_reg_coef,
         "sample_per_step": args.sample_per_step,
         "same_noise_update": args.same_noise_update,
+        "target_noise_std": args.target_noise_std,
         "reward_normalization": args.norm_ret,
     }
     policy = NewRainbowPolicy(**policy_params).to(args.device)
@@ -216,7 +218,8 @@ def run_hyper_rainbow(args=get_args()):
         buf = VectorReplayBuffer(args.buffer_size, buffer_num=len(train_envs))
 
     # collector
-    train_collector = Collector(policy, train_envs, buf, exploration_noise=False)
+    target_noise_dim = args.noise_dim * 2 if model_params.get("dueling_param") else args.noise_dim
+    train_collector = Collector(policy, train_envs, buf, exploration_noise=False, target_noise_dim=target_noise_dim, target_noise_std=args.target_noise_std)
     test_collector = Collector(policy, test_envs, exploration_noise=False)
     # policy.set_eps(1)
     train_collector.collect(n_step=args.min_replay_size)

@@ -55,11 +55,15 @@ class Collector(object):
         buffer: Optional[ReplayBuffer] = None,
         preprocess_fn: Optional[Callable[..., Batch]] = None,
         exploration_noise: bool = False,
+        target_noise_dim: int = 0,
+        target_noise_std: float = 1.0,
     ) -> None:
         super().__init__()
         if isinstance(env, gym.Env) and not hasattr(env, "__len__"):
             warnings.warn("Single environment detected, wrap to DummyVectorEnv.")
             env = DummyVectorEnv([lambda: env])
+        self.target_noise_dim = target_noise_dim
+        self.target_noise_std = target_noise_std
         self.env = env
         self.env_num = len(env)
         self.exploration_noise = exploration_noise
@@ -69,6 +73,11 @@ class Collector(object):
         self._action_space = env.action_space
         # avoid creating attribute outside __init__
         self.reset()
+
+    def _unit_sphere_noise(self):
+        noise = np.random.normal(0, 1, [self.env_num, self.target_noise_dim]) * self.target_noise_std
+        noise /= np.sum(np.sqrt((noise**2)), axis=1, keepdims=True)
+        return noise
 
     def _assign_buffer(self, buffer: Optional[ReplayBuffer]) -> None:
         """Check if the buffer matches the constraint."""
@@ -99,7 +108,7 @@ class Collector(object):
         # use empty Batch for "state" so that self.data supports slicing
         # convert empty Batch to None when passing data to policy
         self.data = Batch(
-            obs={}, act={}, rew={}, done={}, obs_next={}, info={}, policy={}
+            obs={}, act={}, rew={}, done={}, obs_next={}, info={}, policy={}, target_noise={}
         )
         self.reset_env()
         self.reset_buffer()
@@ -120,6 +129,8 @@ class Collector(object):
             obs = self.preprocess_fn(obs=obs,
                                      env_id=np.arange(self.env_num)).get("obs", obs)
         self.data.obs = obs
+        if self.target_noise_std and self.target_noise_dim:
+            self.data.target_noise = self._unit_sphere_noise()
 
     def _reset_state(self, id: Union[int, List[int]]) -> None:
         """Reset the hidden state: self.data.state[id]."""
@@ -238,6 +249,9 @@ class Collector(object):
             obs_next, rew, done, info = result
 
             self.data.update(obs_next=obs_next, rew=rew, done=done, info=info)
+            if self.target_noise_std and self.target_noise_dim:
+                target_noise = self._unit_sphere_noise()
+                self.data.update(target_noise=target_noise)
             if self.preprocess_fn:
                 self.data.update(
                     self.preprocess_fn(

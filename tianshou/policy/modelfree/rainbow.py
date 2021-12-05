@@ -89,6 +89,7 @@ class NewRainbowPolicy(C51Policy):
         hyper_reg_coef: float = 0.001,
         estimation_step: int = 1,
         target_update_freq: int = 0,
+        target_noise_std: float = 0.,
         sample_per_step: bool = True,
         same_noise_update: bool = True,
         reward_normalization: bool = False,
@@ -103,21 +104,27 @@ class NewRainbowPolicy(C51Policy):
         self.q_out_dim = model.Q.output_dim
         self.noise_dim = noise_dim
         self.noise_std = noise_std
+        self.target_noise_std = target_noise_std
         self.hyper_reg_coef = hyper_reg_coef
         self.sample_per_step = sample_per_step
         self.same_noise_update = same_noise_update
 
     def _target_dist(self, batch: Batch, noise: Dict[str, Any] = {}) -> torch.Tensor:
-        main_noise  = noise if self.same_noise_update else self.reset_noise(batch['obs'].shape[0], reset=False)
-        target_noise = noise if self.same_noise_update else self.reset_noise(batch['obs'].shape[0], reset=False)
+        main_model_noise  = noise if self.same_noise_update else self.reset_noise(batch['obs'].shape[0], reset=False)
+        target_model_noise = noise if self.same_noise_update else self.reset_noise(batch['obs'].shape[0], reset=False)
         if self._target:
-            a = self(batch, input="obs_next", is_collecting=False, noise=main_noise).act
-            next_dist = self(batch, model="model_old", input="obs_next", is_collecting=False, noise=target_noise).logits
+            a = self(batch, input="obs_next", is_collecting=False, noise=main_model_noise).act
+            next_dist = self(batch, model="model_old", input="obs_next", is_collecting=False, noise=target_model_noise).logits
         else:
-            next_b = self(batch, input="obs_next", is_collecting=False, noise=main_noise)
+            next_b = self(batch, input="obs_next", is_collecting=False, noise=target_model_noise)
             a = next_b.act
             next_dist = next_b.logits
         next_dist = next_dist[np.arange(len(a)), a, :]
+        if self.target_noise_std and self.noise_dim:
+            update_noise = torch.cat([target_model_noise['Q']['hyper_noise'], target_model_noise['V']['hyper_noise']], dim=1)
+            target_noise = torch.tensor(batch.target_noise)
+            loss_noise = torch.sum(target_noise.mul(update_noise).to(next_dist.device), dim=1, keepdim=True)
+            next_dist += loss_noise
         target_support = batch.returns.clamp(self._v_min, self._v_max)
         # An amazing trick for calculating the projection gracefully.
         # ref: https://github.com/ShangtongZhang/DeepRL

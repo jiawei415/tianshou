@@ -55,6 +55,7 @@ class Collector(object):
         buffer: Optional[ReplayBuffer] = None,
         preprocess_fn: Optional[Callable[..., Batch]] = None,
         exploration_noise: bool = False,
+        ensemble_num: int = 0,
     ) -> None:
         super().__init__()
         if isinstance(env, gym.Env) and not hasattr(env, "__len__"):
@@ -67,6 +68,7 @@ class Collector(object):
         self.policy = policy
         self.preprocess_fn = preprocess_fn
         self._action_space = env.action_space
+        self._ensemble_num = ensemble_num
         # avoid creating attribute outside __init__
         self.reset()
 
@@ -94,17 +96,19 @@ class Collector(object):
                 )
         self.buffer = buffer
 
+    def _gen_ensemble_mask(self):
+        return np.random.binomial(1, 0.5, size=(self.env_num, self._ensemble_num))
+
     def reset(self) -> None:
         """Reset all related variables in the collector."""
         # use empty Batch for "state" so that self.data supports slicing
         # convert empty Batch to None when passing data to policy
         self.data = Batch(
-            obs={}, act={}, rew={}, done={}, obs_next={}, info={}, policy={}
+            obs={}, act={}, rew={}, done={}, obs_next={}, info={}, policy={}, ensemble_mask={}
         )
         self.reset_env()
         self.reset_buffer()
         self.reset_stat()
-
     def reset_stat(self) -> None:
         """Reset the statistic variables."""
         self.collect_step, self.collect_episode, self.collect_time = 0, 0, 0.0
@@ -120,6 +124,8 @@ class Collector(object):
             obs = self.preprocess_fn(obs=obs,
                                      env_id=np.arange(self.env_num)).get("obs", obs)
         self.data.obs = obs
+        if self._ensemble_num:
+            self.data.ensemble_mask = self._gen_ensemble_mask()
 
     def _reset_state(self, id: Union[int, List[int]]) -> None:
         """Reset the hidden state: self.data.state[id]."""
@@ -238,6 +244,8 @@ class Collector(object):
             obs_next, rew, done, info = result
 
             self.data.update(obs_next=obs_next, rew=rew, done=done, info=info)
+            if self._ensemble_num:
+                self.data.update(ensemble_mask=self._gen_ensemble_mask())
             if self.preprocess_fn:
                 self.data.update(
                     self.preprocess_fn(

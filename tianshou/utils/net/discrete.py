@@ -805,6 +805,59 @@ class NewHyperLinear(nn.Module):
         return reg_loss.mean()
 
 
+class EnsembleLinear(nn.Module):
+    """
+    Ensemble Network.
+    """
+    def __init__(
+        self,
+        in_features: int,
+        out_features: int,
+        device: Optional[Union[str, int, torch.device]],
+        ensemble_num: int,
+        ensemble_sizes: Sequence[int] = (),
+        prior_std: float = 0.0,
+    ):
+        super().__init__()
+        self.basedmodel = nn.ModuleList([
+            self.mlp(in_features, out_features, ensemble_sizes) for _ in range(ensemble_num)
+        ])
+        if prior_std:
+            self.prior_model = nn.ModuleList([
+                self.mlp(in_features, out_features, ensemble_sizes) for _ in range(ensemble_num)
+            ])
+
+        self.device = device
+        self.ensemble_num = ensemble_num
+        self.prior_std = prior_std
+
+    def mlp(self, inp_dim, out_dim, hidden_sizes, bias=True):
+        if len(hidden_sizes) == 0:
+            return nn.Linear(inp_dim, out_dim, bias=bias)
+        model = [nn.Linear(inp_dim, hidden_sizes[0], bias=bias)]
+        model += [nn.ReLU(inplace=True)]
+        for i in range(1, len(hidden_sizes)):
+            model += [nn.Linear(hidden_sizes[i-1], hidden_sizes[i], bias=bias)]
+            model += [nn.ReLU(inplace=True)]
+        model += [nn.Linear(hidden_sizes[-1], out_dim, bias=bias)]
+        return nn.Sequential(*model)
+
+    def forward(self, x: torch.Tensor, prior_x=None, active_head=None) -> Tuple[torch.Tensor, Any]:
+        if active_head is not None:
+            out = self.basedmodel[active_head](x)
+            if prior_x is not None:
+                prior_out = self.prior_model[active_head](x)
+                out += prior_out
+        else:
+            out = [self.basedmodel[k](x) for k in range(self.ensemble_num)]
+            out = torch.stack(out, dim=1)
+            if prior_x is not None:
+                prior_out = [self.prior_model[k](x) for k in range(self.ensemble_num)]
+                prior_out = torch.stack(prior_out, dim=1)
+                out += prior_out
+        return out
+
+
 def noisy_layer_noise(batch, inp_dim, out_dim):
     def f(x):
         return x.sign().mul_(x.abs().sqrt_())

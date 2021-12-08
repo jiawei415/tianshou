@@ -12,12 +12,11 @@ from torch.utils.tensorboard import SummaryWriter
 
 from tianshou.data import Collector, PrioritizedVectorReplayBuffer, VectorReplayBuffer
 from tianshou.env import DummyVectorEnv
-from tianshou.env.utils import NoiseWrapper
-from tianshou.policy import NewRainbowPolicy
+from tianshou.policy import NewRainbowPolicy, BootstrappedDQNPolicy
 from tianshou.trainer import offpolicy_trainer
 from tianshou.utils import TensorboardLogger
 from tianshou.utils.net.common import NewNet
-from tianshou.utils.net.discrete import NewNoisyLinear, NewHyperLinear
+from tianshou.utils.net.discrete import NewNoisyLinear, NewHyperLinear, EnsembleLinear
 
 def init_model(model, method='uniform', bias=0.):
     if method == 'xavier':
@@ -71,10 +70,12 @@ def get_args():
     parser.add_argument('--gamma', type=float, default=0.99)
     parser.add_argument('--num-atoms', type=int, default=51)
     parser.add_argument('--v-max', type=float, default=100.)
-    parser.add_argument('--prior-std', type=float, default=0.)
+    parser.add_argument('--prior-std', type=float, default=1.)
     parser.add_argument('--noise-std', type=float, default=1.)
     parser.add_argument('--noise-dim', type=int, default=0)
     parser.add_argument('--noisy-std', type=float, default=0.1)
+    parser.add_argument('--ensemble-num', type=int, default=0)
+    parser.add_argument('--ensemble-sizes', type=int, nargs='*', default=[])
     parser.add_argument('--n-step', type=int, default=3)
     parser.add_argument('--target-update-freq', type=int, default=100)
     parser.add_argument('--epoch', type=int, default=50)
@@ -103,13 +104,13 @@ def get_args():
     parser.add_argument('--policy-path', type=str, default='')
     parser.add_argument('--device', type=str, default='cuda' if torch.cuda.is_available() else 'cpu')
     parser.add_argument("--save-interval", type=int, default=4)
-    parser.add_argument('--config', type=str, default="{}",
-                        help="game config eg., {'seed':2021,'size':20,'hidden_sizes':[512,512],'noise_dim':2,'prior_std':2,'hyper_reg_coef':0.01,}")
+    parser.add_argument('--config', type=str, default="{'hidden_sizes':[64,64],'ensemble_num':0,'noise_dim':2,'prior_std':0,}",
+                        help="game config eg., {'seed':2021,'size':20,'hidden_sizes':[512,512],'ensemble_num':4,'noise_dim':2,'prior_std':2,'hyper_reg_coef':0.01,}")
     args = parser.parse_known_args()[0]
     return args
 
 
-def run_hyper_rainbow(args=get_args()):
+def main(args=get_args()):
     # environment
     def make_thunk(seed):
         return lambda: make_env(
@@ -135,18 +136,15 @@ def run_hyper_rainbow(args=get_args()):
     test_envs.seed(args.seed)
 
     # model
-    last_linear_params = {
-        "device": args.device,
-        "prior_std": args.prior_std,
-        "batch_noise": args.batch_noise,
-    }
-    def last_linear(x, y):
-        if args.noise_dim:
-            last_linear_params.update({"noise_dim": args.noise_dim,})
-            return NewHyperLinear(x, y, **last_linear_params)
+    def last_linear(x, y, device):
+        if args.ensemble_num:
+            return EnsembleLinear(x, y, device, ensemble_num=args.ensemble_num, ensemble_sizes=args.ensemble_sizes, prior_std=args.prior_std)
+        elif args.noise_dim:
+            return NewHyperLinear(x, y, device, noise_dim=args.noise_dim, prior_std=args.prior_std, batch_noise=args.batch_noise)
+        elif args.noisy_std:
+            return NewNoisyLinear(x, y, device, noisy_std=args.noisy_std, prior_std=args.prior_std, batch_noise=args.batch_noise)
         else:
-            last_linear_params.update({"noisy_std": args.noisy_std,})
-            return NewNoisyLinear(x, y, **last_linear_params)
+            NotImplementedError
 
     model_params = {
         "state_shape": args.state_shape,
@@ -156,8 +154,11 @@ def run_hyper_rainbow(args=get_args()):
         "softmax": True,
         "num_atoms": args.num_atoms,
         "prior_std": args.prior_std,
-        "dueling_param": ({ "linear_layer": last_linear}, {"linear_layer": last_linear})
     }
+    if args.ensemble_num:
+        model_params.update({"ensemble_param": ({ "linear_layer": last_linear})})
+    else:
+        model_params.update({"dueling_param": ({ "linear_layer": last_linear}, {"linear_layer": last_linear})})
     model = NewNet(**model_params).to(args.device)
     # model.apply(init_module)
     # init_model(model)
@@ -173,25 +174,30 @@ def run_hyper_rainbow(args=get_args()):
     optim = torch.optim.Adam(trainable_params, lr=args.lr)
 
     # policy
-    hyper_reg_coef = args.hyper_reg_coef / (args.prior_std ** 2) if args.prior_std else args.hyper_reg_coef
     policy_params = {
         "model": model,
         "optim": optim,
         "discount_factor": args.gamma,
-        "num_atoms": args.num_atoms,
-        "v_min": -args.v_max,
-        "v_max": args.v_max,
         "estimation_step": args.n_step,
         "target_update_freq": args.target_update_freq,
-        "noise_std": args.noise_std,
-        "noise_dim": args.noise_dim,
-        "hyper_reg_coef": hyper_reg_coef,
-        "sample_per_step": args.sample_per_step,
-        "same_noise_update": args.same_noise_update,
-        "batch_noise": args.batch_noise,
         "reward_normalization": args.norm_ret,
     }
-    policy = NewRainbowPolicy(**policy_params).to(args.device)
+    if args.ensemble_num:
+        policy_params.update({"ensemble_num": args.ensemble_num})
+        policy = BootstrappedDQNPolicy(**policy_params).to(args.device)
+    else:
+        hyper_reg_coef = args.hyper_reg_coef / (args.prior_std ** 2) if args.prior_std else args.hyper_reg_coef
+        policy_params.update({
+            "num_atoms": args.num_atoms,
+            "v_min": -args.v_max,
+            "v_max": args.v_max,
+            "noise_std": args.noise_std,
+            "noise_dim": args.noise_dim,
+            "hyper_reg_coef": hyper_reg_coef,
+            "sample_per_step": args.sample_per_step,
+            "same_noise_update": args.same_noise_update,
+        })
+        policy = NewRainbowPolicy(**policy_params).to(args.device)
 
     if args.evaluation:
         policy_name = f"{args.task[:-3].lower()}_{args.seed}_{args.policy_path}"
@@ -225,7 +231,7 @@ def run_hyper_rainbow(args=get_args()):
         buf = VectorReplayBuffer(args.buffer_size, buffer_num=len(train_envs))
 
     # collector
-    train_collector = Collector(policy, train_envs, buf, exploration_noise=False)
+    train_collector = Collector(policy, train_envs, buf, exploration_noise=False, ensemble_num=args.ensemble_num)
     test_collector = Collector(policy, test_envs, exploration_noise=False)
     # policy.set_eps(1)
     train_collector.collect(n_step=args.min_replay_size)
@@ -338,4 +344,4 @@ if __name__ == '__main__':
             print(f'unrecognized config k: {k}, v: {v}, ignored')
             continue
         args.__dict__[k] = v
-    run_hyper_rainbow(args)
+    main(args)

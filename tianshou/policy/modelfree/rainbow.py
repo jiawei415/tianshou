@@ -129,11 +129,11 @@ class NewRainbowPolicy(C51Policy):
         return logits
 
     def _target_dist(self, batch: Batch, noise: Dict[str, Any] = {}) -> torch.Tensor:
-        main_noise  = noise if self.same_noise_update else self.reset_noise(batch['obs'].shape[0], reset=False)
-        target_noise = noise if self.same_noise_update else self.reset_noise(batch['obs'].shape[0], reset=False)
+        main_noise  = noise if self.same_noise_update else self.sample_noise(batch['obs'].shape[0], reset=False)
+        target_noise = noise if self.same_noise_update else self.sample_noise(batch['obs'].shape[0], reset=False)
         with torch.no_grad():
-            a = self(batch, input="obs_next", is_collecting=False, noise=main_noise).act
-            next_dist = self(batch, model="model_old", input="obs_next", is_collecting=False, noise=target_noise).logits
+            a = self(batch, input="obs_next", noise=main_noise).act
+            next_dist = self(batch, model="model_old", input="obs_next", noise=target_noise).logits
         support = self.support.view(1, -1, 1)
         target_support = batch.returns.clamp(self._v_min, self._v_max).unsqueeze(-2)
         if self.ensemble_num:
@@ -154,7 +154,6 @@ class NewRainbowPolicy(C51Policy):
         model: str = "model",
         input: str = "obs",
         noise: Dict[str, Any] = {},
-        is_collecting: bool = True,
         **kwargs: Any
     ) -> Batch:
         model = getattr(self, model)
@@ -162,7 +161,7 @@ class NewRainbowPolicy(C51Policy):
         obs_ = obs.obs if hasattr(obs, "obs") else obs
         done = batch['done'][0] if len(batch['done'].shape) > 0 else True
         if self.ensemble_num:
-            if is_collecting:
+            if not self.updating:
                 if self.training:
                     if self.active_head_train is None or done:
                         self.active_head_train = np.random.randint(low=0, high=self.ensemble_num)
@@ -174,10 +173,10 @@ class NewRainbowPolicy(C51Policy):
             else:
                 logits, h = model(obs_, state=state, active_head=None, info=batch.info)
         else:
-            if is_collecting and self.sample_per_step:
-                self.reset_noise(obs_.shape[0], reset=True)
-            elif is_collecting and done:
-                self.reset_noise(obs_.shape[0], reset=True)
+            if not self.updating and self.sample_per_step:
+                self.sample_noise(obs_.shape[0], reset=True)
+            elif not self.updating and done:
+                self.sample_noise(obs_.shape[0], reset=True)
             logits, h = model(obs_, state=state, info=batch.info, noise=noise)
         q = self.compute_q_value(logits, getattr(obs, "mask", None))
         if not hasattr(self, "max_action_num"):
@@ -188,10 +187,9 @@ class NewRainbowPolicy(C51Policy):
     def learn(self, batch: Batch, **kwargs: Any) -> Dict[str, float]:
         if self._target and self._iter % self._freq == 0:
             self.sync_weight()
-        self.optim.zero_grad()
         if self.ensemble_num:
             target_dist = self._target_dist(batch)
-            curr_dist = self(batch, is_collecting=False).logits
+            curr_dist = self(batch).logits
             act = batch.act
             act_one_hot = F.one_hot(torch.as_tensor(act, device=curr_dist.device), self.max_action_num).to(torch.float32)
             curr_dist = torch.einsum('bkat,ba->bkt', curr_dist, act_one_hot) # (None, ensemble_num, num_atoms)
@@ -200,9 +198,9 @@ class NewRainbowPolicy(C51Policy):
             cross_entropy *= masks
         else:
             batch_size = batch['obs'].shape[0] if self.batch_noise else 1
-            noise = self.reset_noise(batch_size, reset=False)
+            noise = self.sample_noise(batch_size, reset=False)
             target_dist = self._target_dist(batch, noise)
-            curr_dist = self(batch, is_collecting=False, noise=noise).logits
+            curr_dist = self(batch, noise=noise).logits
             act = batch.act
             curr_dist = curr_dist[np.arange(len(act)), act, :]
             cross_entropy = -(target_dist * torch.log(curr_dist + 1e-8)).sum(-1)
@@ -212,12 +210,13 @@ class NewRainbowPolicy(C51Policy):
             reg_loss = self.model.Q.model.regularization(noise['Q']) + self.model.V.model.regularization(noise['V'])
             loss += reg_loss * (self.hyper_reg_coef / kwargs['sample_num'])
         batch.weight = cross_entropy.detach()  # prio-buffer
+        self.optim.zero_grad()
         loss.backward()
         self.optim.step()
         self._iter += 1
         return {"loss": loss.item()}
 
-    def reset_noise(self, batch_size: int = 1, reset: bool = True):
+    def sample_noise(self, batch_size: int = 1, reset: bool = True):
         if self.noise_dim:
             hyper_noise = hyper_layer_noise(batch_size, self.noise_dim * 2, self.noise_std)
             Q_noise, V_noise = hyper_noise.split([self.noise_dim, self.noise_dim], dim=1)

@@ -275,6 +275,7 @@ class NewNet(nn.Module):
         softmax: bool = False,
         concat: bool = False,
         num_atoms: int = 1,
+        ensemble_num: int = 0,
         prior_std: float = 0.,
         dueling_param: Optional[Tuple[Dict[str, Any], Dict[str, Any]]] = None,
         ensemble_param: Optional[Tuple[Dict[str, Any], Dict[str, Any]]] = None,
@@ -284,13 +285,14 @@ class NewNet(nn.Module):
         self.softmax = softmax
         self.num_atoms = num_atoms
         self.prior_std = prior_std
+        self.action_num = int(np.prod(action_shape))
         input_dim = int(np.prod(state_shape))
         action_dim = int(np.prod(action_shape)) * num_atoms
         if concat:
             input_dim += action_dim
         self.use_dueling = dueling_param is not None
-        self.use_ensemble = ensemble_param is not None
-        output_dim = action_dim if not self.use_dueling and not self.use_ensemble and not concat else 0
+        self.use_ensemble = bool(ensemble_num) or ensemble_param is not None
+        output_dim = action_dim if not self.use_dueling and not concat else 0
         self.basedmodel = MLP(
             input_dim, output_dim, hidden_sizes, norm_layer, activation, device
         )
@@ -309,12 +311,14 @@ class NewNet(nn.Module):
             q_kwargs: Dict[str, Any] = {
                 **q_kwargs, "input_dim": self.output_dim,
                 "output_dim": q_output_dim,
-                "device": self.device
+                "device": self.device,
+                "ensemble": self.use_ensemble
             }
             v_kwargs: Dict[str, Any] = {
                 **v_kwargs, "input_dim": self.output_dim,
                 "output_dim": v_output_dim,
-                "device": self.device
+                "device": self.device,
+                "ensemble": self.use_ensemble
             }
             self.Q, self.V = LastMLP(**q_kwargs), LastMLP(**v_kwargs)
             self.output_dim = self.Q.output_dim
@@ -342,10 +346,13 @@ class NewNet(nn.Module):
         prior_logits = self.priormodel(s) if self.prior_std else None
         bsz = logits.shape[0]
         if self.use_dueling:  # Dueling DQN
-            q, v = self.Q(logits, prior_logits, noise=noise['Q']), self.V(logits, prior_logits, noise=noise['V'])
+            if self.use_ensemble:
+                q, v = self.Q(logits, prior_logits, active_head=active_head), self.V(logits, prior_logits, active_head=active_head)
+            else:
+                q, v = self.Q(logits, prior_logits, noise=noise.get('Q', {})), self.V(logits, prior_logits, noise=noise.get('V', {}))
             if self.num_atoms > 1:
-                q = q.view(bsz, -1, self.num_atoms)
-                v = v.view(bsz, -1, self.num_atoms)
+                q = q.view(bsz, -1, self.action_num, self.num_atoms).squeeze(dim=1)
+                v = v.view(bsz, -1, 1, self.num_atoms).squeeze(dim=1)
             logits = q - q.mean(dim=1, keepdim=True) + v
         elif self.use_ensemble:
             q = self.Q(logits, prior_logits, active_head=active_head)

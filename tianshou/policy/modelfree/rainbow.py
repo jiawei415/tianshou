@@ -1,13 +1,13 @@
 import torch
+import torch.nn.functional as F
 import numpy as np
-from typing import Any, Dict, Optional, Union
+from typing import Any, Dict, Optional, Union, Callable
 
 
-from tianshou.data import Batch, to_numpy
-from tianshou.data.utils.converter import to_torch
-from tianshou.policy import C51Policy, HyperC51Policy
+from tianshou.policy import BasePolicy, C51Policy, HyperC51Policy
+from tianshou.policy.base import _nstep_return
 from tianshou.utils.net.discrete import sample_noise, noisy_layer_noise, hyper_layer_noise
-
+from tianshou.data import Batch, ReplayBuffer, to_torch_as, to_numpy
 
 class RainbowPolicy(C51Policy):
     """Implementation of Rainbow DQN. arXiv:1710.02298.
@@ -84,15 +84,16 @@ class NewRainbowPolicy(C51Policy):
         num_atoms: int = 51,
         v_min: float = -10,
         v_max: float = 10,
-        noise_dim: int = 2,
+        estimation_step: int = 1,
+        target_update_freq: int = 100,
+        reward_normalization: bool = False,
+        noise_dim: int = 0,
         noise_std: float = 1.,
         hyper_reg_coef: float = 0.001,
-        estimation_step: int = 1,
-        target_update_freq: int = 0,
-        sample_per_step: bool = True,
+        ensemble_num: int = 0,
+        sample_per_step: bool = False,
         same_noise_update: bool = True,
         batch_noise: bool = True,
-        reward_normalization: bool = False,
         **kwargs: Any
     ) -> None:
         super().__init__(
@@ -108,25 +109,42 @@ class NewRainbowPolicy(C51Policy):
         self.sample_per_step = sample_per_step
         self.same_noise_update = same_noise_update
         self.batch_noise = batch_noise
+        self.ensemble_num = ensemble_num
+        self.active_head_train = None
+        self.active_head_test = None
+
+    def _target_q(self, buffer: ReplayBuffer, indices: np.ndarray) -> torch.Tensor:
+        if self.ensemble_num:
+            return self.support.repeat(len(indices), self.ensemble_num, 1)
+        return self.support.repeat(len(indices), 1)
+
+    def compute_q_value(
+        self, logits: torch.Tensor, mask: Optional[np.ndarray]
+    ) -> torch.Tensor:
+        logits = (logits * self.support).sum(-1)
+        if mask is not None:
+            # the masked q value should be smaller than logits.min()
+            min_value = logits.min() - logits.max() - 1.0
+            logits = logits + to_torch_as(1 - mask, logits) * min_value
+        return logits
 
     def _target_dist(self, batch: Batch, noise: Dict[str, Any] = {}) -> torch.Tensor:
         main_noise  = noise if self.same_noise_update else self.reset_noise(batch['obs'].shape[0], reset=False)
         target_noise = noise if self.same_noise_update else self.reset_noise(batch['obs'].shape[0], reset=False)
-        if self._target:
+        with torch.no_grad():
             a = self(batch, input="obs_next", is_collecting=False, noise=main_noise).act
             next_dist = self(batch, model="model_old", input="obs_next", is_collecting=False, noise=target_noise).logits
+        support = self.support.view(1, -1, 1)
+        target_support = batch.returns.clamp(self._v_min, self._v_max).unsqueeze(-2)
+        if self.ensemble_num:
+            a_one_hot = F.one_hot(torch.as_tensor(a, device=next_dist.device), self.max_action_num).to(torch.float32)
+            next_dist = torch.einsum('bkat,bka->bkt', next_dist, a_one_hot)
+            support = support.unsqueeze(1).repeat(1, self.ensemble_num, 1, 1)
         else:
-            next_b = self(batch, input="obs_next", is_collecting=False, noise=main_noise)
-            a = next_b.act
-            next_dist = next_b.logits
-        next_dist = next_dist[np.arange(len(a)), a, :]
-        target_support = batch.returns.clamp(self._v_min, self._v_max)
+            next_dist = next_dist[np.arange(len(a)), a, :]
         # An amazing trick for calculating the projection gracefully.
         # ref: https://github.com/ShangtongZhang/DeepRL
-        target_dist = (
-            1 - (target_support.unsqueeze(1) - self.support.view(1, -1, 1)).abs() /
-            self.delta_z
-        ).clamp(0, 1) * next_dist.unsqueeze(1)
+        target_dist = (1 - (target_support - support).abs() /self.delta_z).clamp(0, 1) * next_dist.unsqueeze(-2)
         return target_dist.sum(-1)
 
     def forward(
@@ -139,37 +157,57 @@ class NewRainbowPolicy(C51Policy):
         is_collecting: bool = True,
         **kwargs: Any
     ) -> Batch:
-        done = batch['done'][0] if len(batch['done'].shape) > 0 else True
+        model = getattr(self, model)
         obs = batch[input]
         obs_ = obs.obs if hasattr(obs, "obs") else obs
-        if is_collecting and self.sample_per_step:
-            self.reset_noise(obs_.shape[0], reset=True)
-        elif is_collecting and done:
-            self.reset_noise(obs_.shape[0], reset=True)
-        if len(noise) == 0:
-            noise = {'Q': {}, 'V':{}}
-        model = getattr(self, model)
-        logits, h = model(obs_, state=state, info=batch.info, noise=noise)
+        done = batch['done'][0] if len(batch['done'].shape) > 0 else True
+        if self.ensemble_num:
+            if is_collecting:
+                if self.training:
+                    if self.active_head_train is None or done:
+                        self.active_head_train = np.random.randint(low=0, high=self.ensemble_num)
+                    logits, h = model(obs_, state=state, active_head=self.active_head_train, info=batch.info)
+                else:
+                    if self.active_head_test is None or done:
+                        self.active_head_test = np.random.randint(low=0, high=self.ensemble_num)
+                    logits, h = model(obs_, state=state, active_head=self.active_head_test, info=batch.info)
+            else:
+                logits, h = model(obs_, state=state, active_head=None, info=batch.info)
+        else:
+            if is_collecting and self.sample_per_step:
+                self.reset_noise(obs_.shape[0], reset=True)
+            elif is_collecting and done:
+                self.reset_noise(obs_.shape[0], reset=True)
+            logits, h = model(obs_, state=state, info=batch.info, noise=noise)
         q = self.compute_q_value(logits, getattr(obs, "mask", None))
         if not hasattr(self, "max_action_num"):
-            self.max_action_num = q.shape[1]
-        act = to_numpy(q.max(dim=1)[1])
+            self.max_action_num = q.shape[-1]
+        act = to_numpy(q.max(dim=-1)[1])
         return Batch(logits=logits, act=act, state=h)
 
     def learn(self, batch: Batch, **kwargs: Any) -> Dict[str, float]:
-        batch_size = batch['obs'].shape[0] if self.batch_noise else 1
-        noise = self.reset_noise(batch_size, reset=False)
         if self._target and self._iter % self._freq == 0:
             self.sync_weight()
         self.optim.zero_grad()
-        with torch.no_grad():
+        if self.ensemble_num:
+            target_dist = self._target_dist(batch)
+            curr_dist = self(batch, is_collecting=False).logits
+            act = batch.act
+            act_one_hot = F.one_hot(torch.as_tensor(act, device=curr_dist.device), self.max_action_num).to(torch.float32)
+            curr_dist = torch.einsum('bkat,ba->bkt', curr_dist, act_one_hot) # (None, ensemble_num, num_atoms)
+            masks = to_torch_as(batch.ensemble_mask, curr_dist)
+            cross_entropy = -(target_dist * torch.log(curr_dist + 1e-8)).sum(-1)
+            cross_entropy *= masks
+        else:
+            batch_size = batch['obs'].shape[0] if self.batch_noise else 1
+            noise = self.reset_noise(batch_size, reset=False)
             target_dist = self._target_dist(batch, noise)
+            curr_dist = self(batch, is_collecting=False, noise=noise).logits
+            act = batch.act
+            curr_dist = curr_dist[np.arange(len(act)), act, :]
+            cross_entropy = -(target_dist * torch.log(curr_dist + 1e-8)).sum(-1)
         weight = batch.pop("weight", 1.0)
-        curr_dist = self(batch, is_collecting=False, noise=noise).logits
-        act = batch.act
-        curr_dist = curr_dist[np.arange(len(act)), act, :]
-        cross_entropy = -(target_dist * torch.log(curr_dist + 1e-8)).sum(1)
-        loss = (cross_entropy * weight).mean()
+        loss = (cross_entropy * weight).mean(0).sum()
         if self.hyper_reg_coef and self.noise_dim:
             reg_loss = self.model.Q.model.regularization(noise['Q']) + self.model.V.model.regularization(noise['V'])
             loss += reg_loss * (self.hyper_reg_coef / kwargs['sample_num'])
@@ -193,3 +231,50 @@ class NewRainbowPolicy(C51Policy):
             self.model.V.model.reset_noise(noise['V'])
         return noise
 
+    @staticmethod
+    def compute_nstep_return(
+        batch: Batch,
+        buffer: ReplayBuffer,
+        indice: np.ndarray,
+        target_q_fn: Callable[[ReplayBuffer, np.ndarray], torch.Tensor],
+        gamma: float = 0.99,
+        n_step: int = 1,
+        rew_norm: bool = False,
+    ) -> Batch:
+        assert not rew_norm, \
+            "Reward normalization in computing n-step returns is unsupported now."
+        rew = buffer.rew
+        bsz = len(indice)
+        indices = [indice]
+        for _ in range(n_step - 1):
+            indices.append(buffer.next(indices[-1]))
+        indices = np.stack(indices)
+        # terminal indicates buffer indexes nstep after 'indice',
+        # and are truncated at the end of each episode
+        terminal = indices[-1]
+
+        with torch.no_grad():
+            target_q_torch = target_q_fn(buffer, terminal)
+        if len(target_q_torch.shape) > 2:
+            # Ziniu Li: return contains all target_q for ensembles
+            end_flag = buffer.done.copy()
+            end_flag[buffer.unfinished_index()] = True
+            target_qs = []
+            for k in range(target_q_torch.shape[1]):
+                target_q = to_numpy(target_q_torch[:, k].reshape(bsz, -1))
+                target_q = target_q * BasePolicy.value_mask(buffer, terminal).reshape(-1, 1)
+                target_q = _nstep_return(rew, end_flag, target_q, indices, gamma, n_step)
+                target_qs.append(target_q)
+            target_qs = np.array(target_qs)   # (ensemble_num, None, num_atoms)
+            target_qs = target_qs.transpose([1, 0, 2])  # (None, ensemble_num, num_atoms)
+            batch.returns = to_torch_as(target_qs, target_q_torch)
+        else:
+            target_q = to_numpy(target_q_torch.reshape(bsz, -1))
+            target_q = target_q * BasePolicy.value_mask(buffer, terminal).reshape(-1, 1)
+            end_flag = buffer.done.copy()
+            end_flag[buffer.unfinished_index()] = True
+            target_q = _nstep_return(rew, end_flag, target_q, indices, gamma, n_step)
+            batch.returns = to_torch_as(target_q, target_q_torch)
+        if hasattr(batch, "weight"):  # prio buffer update
+            batch.weight = to_torch_as(batch.weight, target_q_torch)
+        return batch

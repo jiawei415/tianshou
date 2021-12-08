@@ -12,7 +12,7 @@ from torch.utils.tensorboard import SummaryWriter
 
 from tianshou.data import Collector, PrioritizedVectorReplayBuffer, VectorReplayBuffer
 from tianshou.env import DummyVectorEnv
-from tianshou.policy import NewRainbowPolicy, BootstrappedDQNPolicy
+from tianshou.policy import NewRainbowPolicy
 from tianshou.trainer import offpolicy_trainer
 from tianshou.utils import TensorboardLogger
 from tianshou.utils.net.common import NewNet
@@ -104,7 +104,7 @@ def get_args():
     parser.add_argument('--policy-path', type=str, default='')
     parser.add_argument('--device', type=str, default='cuda' if torch.cuda.is_available() else 'cpu')
     parser.add_argument("--save-interval", type=int, default=4)
-    parser.add_argument('--config', type=str, default="{'hidden_sizes':[64,64],'ensemble_num':0,'noise_dim':2,'prior_std':0,}",
+    parser.add_argument('--config', type=str, default="{}",
                         help="game config eg., {'seed':2021,'size':20,'hidden_sizes':[512,512],'ensemble_num':4,'noise_dim':2,'prior_std':2,'hyper_reg_coef':0.01,}")
     args = parser.parse_known_args()[0]
     return args
@@ -154,11 +154,9 @@ def main(args=get_args()):
         "softmax": True,
         "num_atoms": args.num_atoms,
         "prior_std": args.prior_std,
+        "ensemble_num": args.ensemble_num,
+        "dueling_param": ({ "linear_layer": last_linear}, {"linear_layer": last_linear})
     }
-    if args.ensemble_num:
-        model_params.update({"ensemble_param": ({ "linear_layer": last_linear})})
-    else:
-        model_params.update({"dueling_param": ({ "linear_layer": last_linear}, {"linear_layer": last_linear})})
     model = NewNet(**model_params).to(args.device)
     # model.apply(init_module)
     # init_model(model)
@@ -174,6 +172,7 @@ def main(args=get_args()):
     optim = torch.optim.Adam(trainable_params, lr=args.lr)
 
     # policy
+    hyper_reg_coef = args.hyper_reg_coef / (args.prior_std ** 2) if args.prior_std else args.hyper_reg_coef
     policy_params = {
         "model": model,
         "optim": optim,
@@ -181,23 +180,17 @@ def main(args=get_args()):
         "estimation_step": args.n_step,
         "target_update_freq": args.target_update_freq,
         "reward_normalization": args.norm_ret,
+        "ensemble_num": args.ensemble_num,
+        "num_atoms": args.num_atoms,
+        "v_min": -args.v_max,
+        "v_max": args.v_max,
+        "noise_std": args.noise_std,
+        "noise_dim": args.noise_dim,
+        "hyper_reg_coef": hyper_reg_coef,
+        "sample_per_step": args.sample_per_step,
+        "same_noise_update": args.same_noise_update,
     }
-    if args.ensemble_num:
-        policy_params.update({"ensemble_num": args.ensemble_num})
-        policy = BootstrappedDQNPolicy(**policy_params).to(args.device)
-    else:
-        hyper_reg_coef = args.hyper_reg_coef / (args.prior_std ** 2) if args.prior_std else args.hyper_reg_coef
-        policy_params.update({
-            "num_atoms": args.num_atoms,
-            "v_min": -args.v_max,
-            "v_max": args.v_max,
-            "noise_std": args.noise_std,
-            "noise_dim": args.noise_dim,
-            "hyper_reg_coef": hyper_reg_coef,
-            "sample_per_step": args.sample_per_step,
-            "same_noise_update": args.same_noise_update,
-        })
-        policy = NewRainbowPolicy(**policy_params).to(args.device)
+    policy = NewRainbowPolicy(**policy_params).to(args.device)
 
     if args.evaluation:
         policy_name = f"{args.task[:-3].lower()}_{args.seed}_{args.policy_path}"

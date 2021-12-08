@@ -132,6 +132,7 @@ class LastMLP(nn.Module):
         self,
         input_dim: int,
         output_dim: int = 0,
+        ensemble: bool = False,
         device: Optional[Union[str, int, torch.device]] = None,
         linear_layer: Type[nn.Linear] = nn.Linear,
     ) -> None:
@@ -139,13 +140,17 @@ class LastMLP(nn.Module):
         self.device = device
         self.output_dim = output_dim
         self.model = linear_layer(input_dim, output_dim, device)
+        self.ensemble = ensemble
 
-    def forward(self, s: Union[np.ndarray, torch.Tensor], prior_s=None, noise: Dict[str, Any] = {}) -> torch.Tensor:
+    def forward(self, s: Union[np.ndarray, torch.Tensor], prior_s=None, active_head=None, noise: Dict[str, Any] = {}) -> torch.Tensor:
         if self.device is not None:
             s = torch.as_tensor(s, device=self.device, dtype=torch.float32).flatten(1)
             if prior_s is not None:
                 prior_s = torch.as_tensor(prior_s, device=self.device, dtype=torch.float32).flatten(1)
-        return self.model(s, prior_s, noise)  # type: ignore
+        if self.ensemble:
+            return self.model(s, prior_s, active_head)
+        else:
+            return self.model(s, prior_s, noise)  # type: ignore
 
 
 class Net(nn.Module):
@@ -272,6 +277,7 @@ class NewNet(nn.Module):
         num_atoms: int = 1,
         prior_std: float = 1.,
         dueling_param: Optional[Tuple[Dict[str, Any], Dict[str, Any]]] = None,
+        ensemble_param: Optional[Tuple[Dict[str, Any], Dict[str, Any]]] = None,
     ) -> None:
         super().__init__()
         self.device = device
@@ -283,7 +289,8 @@ class NewNet(nn.Module):
         if concat:
             input_dim += action_dim
         self.use_dueling = dueling_param is not None
-        output_dim = action_dim if not self.use_dueling and not concat else 0
+        self.use_ensemble = ensemble_param is not None
+        output_dim = action_dim if not self.use_dueling and not self.use_ensemble and not concat else 0
         self.basedmodel = MLP(
             input_dim, output_dim, hidden_sizes, norm_layer, activation, device
         )
@@ -311,11 +318,22 @@ class NewNet(nn.Module):
             }
             self.Q, self.V = LastMLP(**q_kwargs), LastMLP(**v_kwargs)
             self.output_dim = self.Q.output_dim
+        elif self.use_ensemble:
+            q_kwargs = ensemble_param  # type: ignore
+            q_output_dim = int(np.prod(action_shape))
+            q_kwargs: Dict[str, Any] = {
+                **q_kwargs, "input_dim": self.output_dim,
+                "output_dim": q_output_dim,
+                "device": self.device,
+                "ensemble": True
+            }
+            self.Q = LastMLP(**q_kwargs)
 
     def forward(
         self,
         s: Union[np.ndarray, torch.Tensor],
         state: Any = None,
+        active_head: Any = None,
         noise: Dict[str, Any] = {},
         info: Dict[str, Any] = {},
     ) -> Tuple[torch.Tensor, Any]:
@@ -324,11 +342,14 @@ class NewNet(nn.Module):
         prior_logits = self.priormodel(s) if self.prior_std else None
         bsz = logits.shape[0]
         if self.use_dueling:  # Dueling DQN
-            q, v = self.Q(logits, prior_logits, noise['Q']), self.V(logits, prior_logits, noise['V'])
+            q, v = self.Q(logits, prior_logits, noise=noise['Q']), self.V(logits, prior_logits, noise=noise['V'])
             if self.num_atoms > 1:
                 q = q.view(bsz, -1, self.num_atoms)
                 v = v.view(bsz, -1, self.num_atoms)
             logits = q - q.mean(dim=1, keepdim=True) + v
+        elif self.use_ensemble:
+            q = self.Q(logits, prior_logits, active_head=active_head)
+            logits = q
         elif self.num_atoms > 1:
             logits = logits.view(bsz, -1, self.num_atoms)
         if self.softmax:

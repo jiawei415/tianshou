@@ -275,7 +275,7 @@ class NewNet(nn.Module):
         softmax: bool = False,
         concat: bool = False,
         num_atoms: int = 1,
-        prior_std: float = 1.,
+        prior_std: float = 0.,
         dueling_param: Optional[Tuple[Dict[str, Any], Dict[str, Any]]] = None,
         ensemble_param: Optional[Tuple[Dict[str, Any], Dict[str, Any]]] = None,
     ) -> None:

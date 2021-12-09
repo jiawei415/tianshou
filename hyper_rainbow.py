@@ -105,7 +105,7 @@ def get_args():
     parser.add_argument('--policy-path', type=str, default='')
     parser.add_argument('--device', type=str, default='cuda' if torch.cuda.is_available() else 'cpu')
     parser.add_argument("--save-interval", type=int, default=4)
-    parser.add_argument('--config', type=str, default="{'hidden_sizes':[64,64],'ensemble_num':0,'noise_dim':2,'prior_std':0,}",
+    parser.add_argument('--config', type=str, default="{}",
                         help="game config eg., {'seed':2021,'size':20,'hidden_sizes':[64,64],'ensemble_num':4,'noise_dim':2,'prior_std':2,'hyper_reg_coef':0.01,}")
     args = parser.parse_known_args()[0]
     return args

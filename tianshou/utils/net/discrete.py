@@ -731,7 +731,7 @@ class NewNoisyLinear(nn.Module):
         out = self.base_forward(x, eps_p.clone(), eps_q.clone())
         if prior_x is not None and self.prior_std > 0:
             prior_out = self.priormodel(prior_x, eps_p.clone(), eps_q.clone())
-            out += prior_out
+            out += prior_out * self.prior_std
         return out
 
     def extra_repr(self):
@@ -845,16 +845,16 @@ class EnsembleLinear(nn.Module):
     def forward(self, x: torch.Tensor, prior_x=None, active_head=None) -> Tuple[torch.Tensor, Any]:
         if active_head is not None:
             out = self.basedmodel[active_head](x)
-            if prior_x is not None:
+            if prior_x is not None and self.prior_std > 0:
                 prior_out = self.prior_model[active_head](x)
-                out += prior_out
+                out += prior_out * self.prior_std
         else:
             out = [self.basedmodel[k](x) for k in range(self.ensemble_num)]
             out = torch.stack(out, dim=1)
-            if prior_x is not None:
+            if prior_x is not None and self.prior_std > 0:
                 prior_out = [self.prior_model[k](x) for k in range(self.ensemble_num)]
                 prior_out = torch.stack(prior_out, dim=1)
-                out += prior_out
+                out += prior_out * self.prior_std
         return out
 
 

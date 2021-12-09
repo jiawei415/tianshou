@@ -91,6 +91,7 @@ class NewRainbowPolicy(C51Policy):
         noise_std: float = 1.,
         hyper_reg_coef: float = 0.001,
         ensemble_num: int = 0,
+        action_sample_num: int = 0,
         sample_per_step: bool = False,
         target_noise_std: float = 0.,
         same_noise_update: bool = True,
@@ -111,6 +112,7 @@ class NewRainbowPolicy(C51Policy):
         self.sample_per_step = sample_per_step
         self.same_noise_update = same_noise_update
         self.batch_noise = batch_noise
+        self.action_sample_num = action_sample_num
         self.ensemble_num = ensemble_num
         self.active_head_train = None
         self.active_head_test = None
@@ -168,27 +170,35 @@ class NewRainbowPolicy(C51Policy):
         obs_ = obs.obs if hasattr(obs, "obs") else obs
         done = batch['done'][0] if len(batch['done'].shape) > 0 else True
         if self.ensemble_num:
+            active_head = None
             if not self.updating:
                 if self.training:
                     if self.active_head_train is None or done:
                         self.active_head_train = np.random.randint(low=0, high=self.ensemble_num)
-                    logits, h = model(obs_, state=state, active_head=self.active_head_train, info=batch.info)
+                    active_head = self.active_head_train
                 else:
-                    if self.active_head_test is None or done:
-                        self.active_head_test = np.random.randint(low=0, high=self.ensemble_num)
-                    logits, h = model(obs_, state=state, active_head=self.active_head_test, info=batch.info)
-            else:
-                logits, h = model(obs_, state=state, active_head=None, info=batch.info)
+                    if not self.action_sample_num:
+                        if self.active_head_test is None or done:
+                            self.active_head_test = np.random.randint(low=0, high=self.ensemble_num)
+                        active_head = self.active_head_test
+            logits, h = model(obs_, state=state, active_head=active_head, info=batch.info)
         else:
-            if not self.updating and self.sample_per_step:
-                self.sample_noise(obs_.shape[0], reset=True)
-            elif not self.updating and done:
-                self.sample_noise(obs_.shape[0], reset=True)
-            logits, h = model(obs_, state=state, info=batch.info, noise=noise)
+            if not self.updating:
+                if self.training:
+                    if self.sample_per_step or done:
+                        self.sample_noise(obs_.shape[0], reset=True)
+                else:
+                    if self.action_sample_num:
+                        noise = self.sample_noise(self.action_sample_num, reset=False)
+                        obs_ = obs_.repeat(self.action_sample_num, axis=0)
+            logits, h = model(obs_, state=state, noise=noise, info=batch.info)
         q = self.compute_q_value(logits, getattr(obs, "mask", None))
         if not hasattr(self, "max_action_num"):
             self.max_action_num = q.shape[-1]
-        act = to_numpy(q.max(dim=-1)[1])
+        if self.action_sample_num and not self.updating and not self.training:
+            act = to_numpy(torch.argmax(q.squeeze(0)) % self.max_action_num).reshape(1)
+        else:
+            act = to_numpy(q.max(dim=-1)[1])
         return Batch(logits=logits, act=act, state=h)
 
     def learn(self, batch: Batch, **kwargs: Any) -> Dict[str, float]:

@@ -77,6 +77,7 @@ def get_args():
     parser.add_argument('--noisy-std', type=float, default=0.1)
     parser.add_argument('--ensemble-num', type=int, default=0)
     parser.add_argument('--ensemble-sizes', type=int, nargs='*', default=[])
+    parser.add_argument('--action-sample-num', type=int, default=0)
     parser.add_argument('--n-step', type=int, default=3)
     parser.add_argument('--target-update-freq', type=int, default=100)
     parser.add_argument('--epoch', type=int, default=50)
@@ -191,6 +192,7 @@ def main(args=get_args()):
         "sample_per_step": args.sample_per_step,
         "same_noise_update": args.same_noise_update,
         "target_noise_std": args.target_noise_std,
+        "action_sample_num": args.action_sample_num,
     }
     policy = NewRainbowPolicy(**policy_params).to(args.device)
 

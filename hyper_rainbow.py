@@ -70,7 +70,8 @@ def get_args():
     parser.add_argument('--gamma', type=float, default=0.99)
     parser.add_argument('--num-atoms', type=int, default=51)
     parser.add_argument('--v-max', type=float, default=100.)
-    parser.add_argument('--prior-std', type=float, default=1.)
+    parser.add_argument('--target-noise-std', type=float, default=0.)
+    parser.add_argument('--prior-std', type=float, default=0.)
     parser.add_argument('--noise-std', type=float, default=1.)
     parser.add_argument('--noise-dim', type=int, default=0)
     parser.add_argument('--noisy-std', type=float, default=0.1)
@@ -104,8 +105,8 @@ def get_args():
     parser.add_argument('--policy-path', type=str, default='')
     parser.add_argument('--device', type=str, default='cuda' if torch.cuda.is_available() else 'cpu')
     parser.add_argument("--save-interval", type=int, default=4)
-    parser.add_argument('--config', type=str, default="{}",
-                        help="game config eg., {'seed':2021,'size':20,'hidden_sizes':[512,512],'ensemble_num':4,'noise_dim':2,'prior_std':2,'hyper_reg_coef':0.01,}")
+    parser.add_argument('--config', type=str, default="{'hidden_sizes':[64,64],'ensemble_num':0,'noise_dim':2,'prior_std':0,}",
+                        help="game config eg., {'seed':2021,'size':20,'hidden_sizes':[64,64],'ensemble_num':4,'noise_dim':2,'prior_std':2,'hyper_reg_coef':0.01,}")
     args = parser.parse_known_args()[0]
     return args
 
@@ -180,15 +181,16 @@ def main(args=get_args()):
         "estimation_step": args.n_step,
         "target_update_freq": args.target_update_freq,
         "reward_normalization": args.norm_ret,
-        "ensemble_num": args.ensemble_num,
         "num_atoms": args.num_atoms,
         "v_min": -args.v_max,
         "v_max": args.v_max,
+        "ensemble_num": args.ensemble_num,
         "noise_std": args.noise_std,
         "noise_dim": args.noise_dim,
         "hyper_reg_coef": hyper_reg_coef,
         "sample_per_step": args.sample_per_step,
         "same_noise_update": args.same_noise_update,
+        "target_noise_std": args.target_noise_std,
     }
     policy = NewRainbowPolicy(**policy_params).to(args.device)
 
@@ -224,7 +226,16 @@ def main(args=get_args()):
         buf = VectorReplayBuffer(args.buffer_size, buffer_num=len(train_envs))
 
     # collector
-    train_collector = Collector(policy, train_envs, buf, exploration_noise=False, ensemble_num=args.ensemble_num)
+    target_noise_dim = args.noise_dim * 2 if model_params.get("dueling_param") else args.noise_dim
+    train_collector = Collector(
+        policy,
+        train_envs,
+        buf,
+        exploration_noise=False,
+        target_noise_dim=target_noise_dim,
+        target_noise_std=args.target_noise_std,
+        ensemble_num=args.ensemble_num
+    )
     test_collector = Collector(policy, test_envs, exploration_noise=False)
     # policy.set_eps(1)
     train_collector.collect(n_step=args.min_replay_size)

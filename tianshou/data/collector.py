@@ -56,11 +56,15 @@ class Collector(object):
         preprocess_fn: Optional[Callable[..., Batch]] = None,
         exploration_noise: bool = False,
         ensemble_num: int = 0,
+        target_noise_dim: int = 0,
+        target_noise_std: float = 1.0,
     ) -> None:
         super().__init__()
         if isinstance(env, gym.Env) and not hasattr(env, "__len__"):
             warnings.warn("Single environment detected, wrap to DummyVectorEnv.")
             env = DummyVectorEnv([lambda: env])
+        self.target_noise_dim = target_noise_dim
+        self.target_noise_std = target_noise_std
         self.env = env
         self.env_num = len(env)
         self.exploration_noise = exploration_noise
@@ -71,6 +75,11 @@ class Collector(object):
         self._ensemble_num = ensemble_num
         # avoid creating attribute outside __init__
         self.reset()
+
+    def _unit_sphere_noise(self):
+        noise = np.random.normal(0, 1, [self.env_num, self.target_noise_dim]) * self.target_noise_std
+        noise /= np.sum(np.sqrt((noise**2)), axis=1, keepdims=True)
+        return noise
 
     def _assign_buffer(self, buffer: Optional[ReplayBuffer]) -> None:
         """Check if the buffer matches the constraint."""
@@ -104,7 +113,7 @@ class Collector(object):
         # use empty Batch for "state" so that self.data supports slicing
         # convert empty Batch to None when passing data to policy
         self.data = Batch(
-            obs={}, act={}, rew={}, done={}, obs_next={}, info={}, policy={}, ensemble_mask={}
+            obs={}, act={}, rew={}, done={}, obs_next={}, info={}, policy={}, target_noise={}, ensemble_mask={}
         )
         self.reset_env()
         self.reset_buffer()
@@ -126,6 +135,8 @@ class Collector(object):
         self.data.obs = obs
         if self._ensemble_num:
             self.data.ensemble_mask = self._gen_ensemble_mask()
+        if self.target_noise_std and self.target_noise_dim:
+            self.data.target_noise = self._unit_sphere_noise()
 
     def _reset_state(self, id: Union[int, List[int]]) -> None:
         """Reset the hidden state: self.data.state[id]."""
@@ -246,6 +257,8 @@ class Collector(object):
             self.data.update(obs_next=obs_next, rew=rew, done=done, info=info)
             if self._ensemble_num:
                 self.data.update(ensemble_mask=self._gen_ensemble_mask())
+            if self.target_noise_std and self.target_noise_dim:
+                self.data.update(target_noise=self._unit_sphere_noise())
             if self.preprocess_fn:
                 self.data.update(
                     self.preprocess_fn(

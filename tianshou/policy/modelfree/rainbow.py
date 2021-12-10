@@ -92,6 +92,9 @@ class NewRainbowPolicy(C51Policy):
         hyper_reg_coef: float = 0.001,
         ensemble_num: int = 0,
         action_sample_num: int = 0,
+        action_select_scheme: str = None,
+        value_var_eps: float = 1e-3,
+        value_gap_eps: float = 1e-3,
         sample_per_step: bool = False,
         target_noise_std: float = 0.,
         same_noise_update: bool = True,
@@ -115,9 +118,12 @@ class NewRainbowPolicy(C51Policy):
         self.noise_train = None
         self.noise_test = None
         self.action_sample_num = action_sample_num
+        self.action_select_scheme = action_select_scheme
         self.ensemble_num = ensemble_num
         self.active_head_train = None
         self.active_head_test = None
+        self.value_gap_eps = value_gap_eps
+        self.value_var_eps = value_var_eps
 
     def _target_q(self, buffer: ReplayBuffer, indices: np.ndarray) -> torch.Tensor:
         if self.ensemble_num:
@@ -203,8 +209,17 @@ class NewRainbowPolicy(C51Policy):
         q = self.compute_q_value(logits, getattr(obs, "mask", None))  # (None,) or (None, ensemble_num)
         if not hasattr(self, "max_action_num"):
             self.max_action_num = q.shape[-1]
-        if self.action_sample_num and not self.updating and not self.training:
-            act = to_numpy(torch.argmax(q.squeeze(0)) % self.max_action_num).reshape(1)
+        if self.action_sample_num and not self.updating:
+            if self.action_select_scheme == "MAX":
+                act = to_numpy(torch.argmax(q.squeeze(0)) % self.max_action_num).reshape(1)
+            elif self.action_select_scheme == "VIDS":
+                value_gap = q.max(dim=-1, keepdim=True)[0] - q
+                value_gap = value_gap.mean(dim=0) + self.value_gap_eps
+                value_var = torch.var(logits, dim=0)
+                value_var = value_var.mean(dim=1) + self.value_var_eps
+                act = to_numpy(torch.argmin(value_gap / value_var)).reshape(1)
+            else:
+                raise ValueError(self.action_select_scheme)
         else:
             act = to_numpy(q.max(dim=-1)[1])
         return Batch(logits=logits, act=act, state=h)

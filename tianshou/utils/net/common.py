@@ -349,7 +349,7 @@ class NewNet(nn.Module):
             if self.use_ensemble:
                 q, v = self.Q(logits, prior_logits, active_head=active_head), self.V(logits, prior_logits, active_head=active_head)
             else:
-                q, v = self.Q(logits, prior_logits, noise=noise.get('Q', {})), self.V(logits, prior_logits, noise=noise.get('V', {}))
+                q, v = self.Q(logits, prior_logits, noise=noise['Q']), self.V(logits, prior_logits, noise=noise['V'])
             if self.num_atoms > 1:
                 q = q.view(bsz, -1, self.action_num, self.num_atoms).squeeze(dim=1)
                 v = v.view(bsz, -1, 1, self.num_atoms).squeeze(dim=1)

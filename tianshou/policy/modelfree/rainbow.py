@@ -174,33 +174,33 @@ class NewRainbowPolicy(C51Policy):
         done = batch['done'][0] if len(batch['done'].shape) > 0 else True
         if self.ensemble_num:
             if not self.updating:
-                if self.training:
-                    if self.active_head_train is None or done:
-                        self.active_head_train = np.random.randint(low=0, high=self.ensemble_num)
-                    active_head = self.active_head_train
-                else:
-                    if not self.action_sample_num:
+                if not self.action_sample_num:
+                    if self.training:
+                        if self.active_head_train is None or done:
+                            self.active_head_train = np.random.randint(low=0, high=self.ensemble_num)
+                        active_head = self.active_head_train
+                    else:
                         if self.active_head_test is None or done:
                             self.active_head_test = np.random.randint(low=0, high=self.ensemble_num)
                         active_head = self.active_head_test
-            logits, h = model(obs_, state=state, active_head=active_head, info=batch.info)
+            logits, h = model(obs_, state=state, active_head=active_head, info=batch.info) # (None, ensemble_num, num_atoms)
         else:
             if not self.updating:
+                if self.action_sample_num:
+                    noise_num = self.action_sample_num
+                    obs_ = obs_.repeat(self.action_sample_num, axis=0)
+                else:
+                    noise_num = obs_.shape[0]
                 if self.training:
                     if self.noise_train is None or self.sample_per_step or done:
-                        self.noise_train = self.sample_noise(obs_.shape[0])
+                        self.noise_train = self.sample_noise(noise_num)
                     noise = self.noise_train
                 else:
-                    if self.action_sample_num:
-                        noise_num = self.action_sample_num
-                        obs_ = obs_.repeat(self.action_sample_num, axis=0)
-                    else:
-                        noise_num = obs_.shape[0]
                     if self.noise_test is None or self.sample_per_step or done:
                         self.noise_test = self.sample_noise(noise_num)
                     noise = self.noise_test
-            logits, h = model(obs_, state=state, noise=noise, info=batch.info) # (None, num_atoms) or (None, ensemble_num, num_atoms)
-        q = self.compute_q_value(logits, getattr(obs, "mask", None))  # (None,) or (None, ensemble_num,) 
+            logits, h = model(obs_, state=state, noise=noise, info=batch.info) # (None, num_atoms)
+        q = self.compute_q_value(logits, getattr(obs, "mask", None))  # (None,) or (None, ensemble_num)
         if not hasattr(self, "max_action_num"):
             self.max_action_num = q.shape[-1]
         if self.action_sample_num and not self.updating and not self.training:

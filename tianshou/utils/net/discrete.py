@@ -701,9 +701,9 @@ class NewNoisyLinear(nn.Module):
 
         self.init_params()
 
-    def reset_noise(self, noise):
-        self.eps_p = noise['eps_p'].to(self.device)
-        self.eps_q = noise['eps_q'].to(self.device)
+    # def reset_noise(self, noise):
+    #     self.eps_p = noise['eps_p'].to(self.device)
+    #     self.eps_q = noise['eps_q'].to(self.device)
 
     def init_params(self) -> None:
         bound = 1 / np.sqrt(self.in_features)
@@ -726,8 +726,8 @@ class NewNoisyLinear(nn.Module):
         return out
 
     def forward(self, x: torch.Tensor, prior_x=None, noise: Dict[str, Any] = {}) -> torch.Tensor:
-        eps_q = noise.get("eps_q", self.eps_q).to(self.device)
-        eps_p = noise.get("eps_p", self.eps_p).to(self.device)
+        eps_q = noise["eps_q"].to(self.device)
+        eps_p = noise["eps_p"].to(self.device)
         out = self.base_forward(x, eps_p.clone(), eps_q.clone())
         if prior_x is not None and self.prior_std > 0:
             prior_out = self.priormodel(prior_x, eps_p.clone(), eps_q.clone())
@@ -770,8 +770,8 @@ class NewHyperLinear(nn.Module):
         self.weight_shape = (in_features, out_features) if batch_noise else (out_features, in_features)
         self.bias_shape = (1, out_features) if batch_noise else (out_features,)
 
-    def reset_noise(self, noise):
-        self.hyper_noise = noise['hyper_noise'].to(self.device)
+    # def reset_noise(self, noise):
+    #     self.hyper_noise = noise['hyper_noise'].to(self.device)
 
     def base_forward_v1(self, x: torch.Tensor, params: torch.Tensor):
         weight, bias = params.split(self.splited_size, dim=1)
@@ -789,7 +789,7 @@ class NewHyperLinear(nn.Module):
         return out
 
     def forward(self, x: torch.Tensor, prior_x=None, noise: Dict[str, Any]={}) -> torch.Tensor:
-        hyper_noise = noise.get('hyper_noise', self.hyper_noise).to(self.device)
+        hyper_noise = noise['hyper_noise'].to(self.device)
         params = self.hypermodel(hyper_noise)
         out = self.base_forward(x, params)
         if prior_x is not None and self.prior_std > 0:

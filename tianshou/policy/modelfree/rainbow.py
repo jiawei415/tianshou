@@ -98,7 +98,7 @@ class NewRainbowPolicy(C51Policy):
         sample_per_step: bool = False,
         target_noise_std: float = 0.,
         same_noise_update: bool = True,
-        batch_noise: bool = True,
+        batch_noise_update: bool = True,
         **kwargs: Any
     ) -> None:
         super().__init__(
@@ -114,7 +114,7 @@ class NewRainbowPolicy(C51Policy):
         self.hyper_reg_coef = hyper_reg_coef
         self.sample_per_step = sample_per_step
         self.same_noise_update = same_noise_update
-        self.batch_noise = batch_noise
+        self.batch_noise_update = batch_noise_update
         self.noise_train = None
         self.noise_test = None
         self.action_sample_num = action_sample_num
@@ -140,20 +140,24 @@ class NewRainbowPolicy(C51Policy):
             logits = logits + to_torch_as(1 - mask, logits) * min_value
         return logits
 
-    def _target_dist(self, batch: Batch, noise: Dict[str, Any] = {}) -> torch.Tensor:
-        main_model_noise  = noise if self.same_noise_update else self.sample_noise(batch['obs'].shape[0])
-        target_model_noise = noise if self.same_noise_update else self.sample_noise(batch['obs'].shape[0])
-        with torch.no_grad():
-            a = self(batch, input="obs_next", noise=main_model_noise).act # (None,) or (None, ensemble_num)
-            next_dist = self(batch, model="model_old", input="obs_next", noise=target_model_noise).logits # (None, action_num, num_atoms) or (None, ensemble_num, action_num, num_atoms)
-        support = self.support.view(1, -1, 1) # (1, num_atoms, 1)
-        target_support = batch.returns.clamp(self._v_min, self._v_max).unsqueeze(-2) # (None, 1, num_atoms) or (None, ensemble_num, 1, num_atoms)
+    def _target_dist(self, batch: Batch, noise: Dict[str, Any] = {}, active_head: Any = None,) -> torch.Tensor:
         if self.ensemble_num:
+            main_model_head = active_head if self.same_noise_update else np.random.randint(low=0, high=self.ensemble_num, size=self.ensemble_num).tolist()
+            target_model_head = active_head if self.same_noise_update else np.random.randint(low=0, high=self.ensemble_num, size=self.ensemble_num).tolist()
+            with torch.no_grad():
+                a = self(batch, input="obs_next", active_head=main_model_head).act # (None, ensemble_num)
+                next_dist = self(batch, model="model_old", input="obs_next", active_head=target_model_head).logits # (None, ensemble_num, action_num, num_atoms)
             a_one_hot = F.one_hot(torch.as_tensor(a, device=next_dist.device), self.max_action_num).to(torch.float32) # (None, ensemble_num, action_num)
             next_dist = torch.einsum('bkat,bka->bkt', next_dist, a_one_hot) # (None, ensemble_num, num_atoms)
-            support = support.unsqueeze(1).repeat(1, self.ensemble_num, 1, 1) # (1, ensemble_num, num_atoms, 1)
+            support = self.support.view(1, 1, -1, 1).repeat(1, self.ensemble_num, 1, 1) # (1, ensemble_num, num_atoms, 1)
         else:
+            main_model_noise  = noise if self.same_noise_update else self.sample_noise(batch['obs'].shape[0])
+            target_model_noise = noise if self.same_noise_update else self.sample_noise(batch['obs'].shape[0])
+            with torch.no_grad():
+                a = self(batch, input="obs_next", noise=main_model_noise).act # (None,)
+                next_dist = self(batch, model="model_old", input="obs_next", noise=target_model_noise).logits # (None, action_num, num_atoms)
             next_dist = next_dist[np.arange(len(a)), a, :] # (None, num_atoms)
+            support = self.support.view(1, -1, 1) # (1, num_atoms, 1)
             if self.target_noise_std and self.noise_dim:
                 update_noise = torch.cat([target_model_noise['Q']['hyper_noise'], target_model_noise['V']['hyper_noise']], dim=1)
                 target_noise = torch.tensor(batch.target_noise)
@@ -161,6 +165,7 @@ class NewRainbowPolicy(C51Policy):
                 next_dist += loss_noise
         # An amazing trick for calculating the projection gracefully.
         # ref: https://github.com/ShangtongZhang/DeepRL
+        target_support = batch.returns.clamp(self._v_min, self._v_max).unsqueeze(-2) # (None, 1, num_atoms) or (None, ensemble_num, 1, num_atoms)
         target_dist = (1 - (target_support - support).abs() / self.delta_z).clamp(0, 1) * next_dist.unsqueeze(-2) # (None, num_atoms, num_atoms) or (None, ensemble_num, num_atoms, num_atoms)
         return target_dist.sum(-1) # (None, num_atoms) or (None, ensemble_num, num_atoms)
 
@@ -182,11 +187,11 @@ class NewRainbowPolicy(C51Policy):
             if not self.updating:
                 if not self.action_sample_num:
                     if self.training:
-                        if self.active_head_train is None or done:
+                        if self.active_head_train is None or self.sample_per_step or done:
                             self.active_head_train = np.random.randint(low=0, high=self.ensemble_num)
                         active_head = self.active_head_train
                     else:
-                        if self.active_head_test is None or done:
+                        if self.active_head_test is None or self.sample_per_step or done:
                             self.active_head_test = np.random.randint(low=0, high=self.ensemble_num)
                         active_head = self.active_head_test
             logits, h = model(obs_, state=state, active_head=active_head, info=batch.info) # (None, ensemble_num, num_atoms)
@@ -210,12 +215,14 @@ class NewRainbowPolicy(C51Policy):
         if not hasattr(self, "max_action_num"):
             self.max_action_num = q.shape[-1]
         if self.action_sample_num and not self.updating:
+            q_ = q.squeeze(0)
+            logits_ = logits.squeeze(0)
             if self.action_select_scheme == "MAX":
-                act = to_numpy(torch.argmax(q.squeeze(0)) % self.max_action_num).reshape(1)
+                act = to_numpy(torch.argmax(q_) % self.max_action_num).reshape(1)
             elif self.action_select_scheme == "VIDS":
-                value_gap = q.max(dim=-1, keepdim=True)[0] - q
+                value_gap = q_.max(dim=-1, keepdim=True)[0] - q_
                 value_gap = value_gap.mean(dim=0) + self.value_gap_eps
-                value_var = torch.var(logits, dim=0)
+                value_var = torch.var(logits_, dim=0)
                 value_var = value_var.mean(dim=1) + self.value_var_eps
                 act = to_numpy(torch.argmin(value_gap / value_var)).reshape(1)
             else:
@@ -237,7 +244,7 @@ class NewRainbowPolicy(C51Policy):
             cross_entropy = -(target_dist * torch.log(curr_dist + 1e-8)).sum(-1) # (None, ensemble_num)
             cross_entropy *= masks # (None, ensemble_num)
         else:
-            noise_num = batch['obs'].shape[0] if self.batch_noise else 1
+            noise_num = batch['obs'].shape[0] if self.batch_noise_update else 1
             update_noise = self.sample_noise(noise_num)
             target_dist = self._target_dist(batch, noise=update_noise) # (None, num_atoms)
             curr_dist = self(batch, noise=update_noise).logits # (None, action_num, num_atoms)

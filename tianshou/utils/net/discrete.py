@@ -829,6 +829,7 @@ class EnsembleLinear(nn.Module):
 
         self.device = device
         self.ensemble_num = ensemble_num
+        self.head_list = list(range(self.ensemble_num))
         self.prior_std = prior_std
 
     def mlp(self, inp_dim, out_dim, hidden_sizes, bias=True):
@@ -843,17 +844,18 @@ class EnsembleLinear(nn.Module):
         return nn.Sequential(*model)
 
     def forward(self, x: torch.Tensor, prior_x=None, active_head=None) -> Tuple[torch.Tensor, Any]:
-        if active_head is not None:
+        if active_head is None or isinstance(active_head, list):
+            active_head = active_head or self.head_list
+            out = [self.basedmodel[k](x) for k in active_head]
+            out = torch.stack(out, dim=1)
+            if prior_x is not None and self.prior_std > 0:
+                prior_out = [self.prior_model[k](x) for k in active_head]
+                prior_out = torch.stack(prior_out, dim=1)
+                out += prior_out * self.prior_std
+        else:
             out = self.basedmodel[active_head](x)
             if prior_x is not None and self.prior_std > 0:
                 prior_out = self.prior_model[active_head](x)
-                out += prior_out * self.prior_std
-        else:
-            out = [self.basedmodel[k](x) for k in range(self.ensemble_num)]
-            out = torch.stack(out, dim=1)
-            if prior_x is not None and self.prior_std > 0:
-                prior_out = [self.prior_model[k](x) for k in range(self.ensemble_num)]
-                prior_out = torch.stack(prior_out, dim=1)
                 out += prior_out * self.prior_std
         return out
 

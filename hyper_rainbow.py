@@ -66,8 +66,9 @@ def get_args():
     parser.add_argument('--lr', type=float, default=0.0001)
     parser.add_argument('--hyper-reg-coef', type=float, default=0.01)
     parser.add_argument('--hyper-weight-decay', type=float, default=0.0003125)
-    parser.add_argument('--base-weight-decay', type=float, default=0.0003125)
+    parser.add_argument('--based-weight-decay', type=float, default=0.0003125)
     parser.add_argument('--gamma', type=float, default=0.99)
+    parser.add_argument('--n-step', type=int, default=3)
     parser.add_argument('--num-atoms', type=int, default=51)
     parser.add_argument('--v-max', type=float, default=100.)
     parser.add_argument('--target-noise-std', type=float, default=0.)
@@ -77,37 +78,37 @@ def get_args():
     parser.add_argument('--noisy-std', type=float, default=0.1)
     parser.add_argument('--ensemble-num', type=int, default=0)
     parser.add_argument('--ensemble-sizes', type=int, nargs='*', default=[])
-    parser.add_argument('--action-sample-num', type=int, default=0)
-    parser.add_argument('--n-step', type=int, default=3)
+    parser.add_argument('--hidden-sizes', type=int, nargs='*', default=[128, 128])
     parser.add_argument('--target-update-freq', type=int, default=100)
-    parser.add_argument('--epoch', type=int, default=50)
+    parser.add_argument('--epoch', type=int, default=500)
     parser.add_argument('--step-per-epoch', type=int, default=1000)
     parser.add_argument('--step-per-collect', type=int, default=2)
     parser.add_argument('--update-per-step', type=int, default=1)
     parser.add_argument('--batch-size', type=int, default=128)
-    parser.add_argument('--hidden-sizes', type=int, nargs='*', default=[512, 512])
-    # parser.add_argument('--training-num', type=int, default=1)
-    # parser.add_argument('--testing-num', type=int, default=1)
     parser.add_argument('--episode-per-test', type=int, default=10)
     parser.add_argument('--logdir', type=str, default='results')
     parser.add_argument('--render', type=float, default=0.)
-    parser.add_argument('--norm-obs', action="store_true", default=True)
+    parser.add_argument('--norm-obs', action="store_true", default=False)
     parser.add_argument('--norm-ret', action="store_true", default=False)
     parser.add_argument('--prioritized', action="store_true", default=False)
     parser.add_argument('--alpha', type=float, default=0.6)
     parser.add_argument('--beta', type=float, default=0.4)
     parser.add_argument('--beta-final', type=float, default=1.)
-    parser.add_argument('--sample-per-step', action="store_true", default=False)
-    parser.add_argument('--same-noise-update', action="store_true", default=True)
-    parser.add_argument('--batch-noise', action="store_true", default=True)
     parser.add_argument('--resume', action="store_true", default=False)
     parser.add_argument('--resume-path', type=str, default='')
     parser.add_argument('--evaluation', action="store_true", default=False)
     parser.add_argument('--policy-path', type=str, default='')
-    parser.add_argument('--device', type=str, default='cuda' if torch.cuda.is_available() else 'cpu')
     parser.add_argument("--save-interval", type=int, default=4)
+    parser.add_argument('--device', type=str, default='cuda' if torch.cuda.is_available() else 'cpu')
+    parser.add_argument('--sample-per-step', action="store_true", default=False)
+    parser.add_argument('--same-noise-update', action="store_true", default=True)
+    parser.add_argument('--batch-noise-update', action="store_true", default=True)
+    parser.add_argument('--action-sample-num', type=int, default=0)
+    parser.add_argument('--action-select-scheme', type=str, default='MAX', help='MAX, VIDS')
+    parser.add_argument('--value-gap-eps', type=float, default=1e-3)
+    parser.add_argument('--value-var-eps', type=float, default=1e-3)
     parser.add_argument('--config', type=str, default="{}",
-                        help="game config eg., {'seed':2021,'size':20,'hidden_sizes':[64,64],'ensemble_num':4,'noise_dim':2,'prior_std':2,'hyper_reg_coef':0.01,}")
+                        help="game config eg., {'seed':2021,'size':20,'hidden_sizes':[128,128],'ensemble_num':4,'noise_dim':2,'prior_std':2,'hyper_reg_coef':0.01,}")
     args = parser.parse_known_args()[0]
     return args
 
@@ -142,9 +143,9 @@ def main(args=get_args()):
         if args.ensemble_num:
             return EnsembleLinear(x, y, device, ensemble_num=args.ensemble_num, ensemble_sizes=args.ensemble_sizes, prior_std=args.prior_std)
         elif args.noise_dim:
-            return NewHyperLinear(x, y, device, noise_dim=args.noise_dim, prior_std=args.prior_std, batch_noise=args.batch_noise)
+            return NewHyperLinear(x, y, device, noise_dim=args.noise_dim, prior_std=args.prior_std, batch_noise=args.batch_noise_update)
         elif args.noisy_std:
-            return NewNoisyLinear(x, y, device, noisy_std=args.noisy_std, prior_std=args.prior_std, batch_noise=args.batch_noise)
+            return NewNoisyLinear(x, y, device, noisy_std=args.noisy_std, prior_std=args.prior_std, batch_noise=args.batch_noise_update)
         else:
             NotImplementedError
 
@@ -168,7 +169,7 @@ def main(args=get_args()):
     if args.hyper_reg_coef:
         args.hyper_weight_decay = 0
     trainable_params = [
-            {'params': (p for name, p in model.named_parameters() if 'priormodel' not in name and 'hypermodel' not in name), 'weight_decay': args.base_weight_decay},
+            {'params': (p for name, p in model.named_parameters() if 'priormodel' not in name and 'hypermodel' not in name), 'weight_decay': args.based_weight_decay},
             {'params': (p for name, p in model.named_parameters() if 'priormodel' not in name and 'hypermodel' in name), 'weight_decay': args.hyper_weight_decay},
         ]
     optim = torch.optim.Adam(trainable_params, lr=args.lr)
@@ -191,8 +192,10 @@ def main(args=get_args()):
         "hyper_reg_coef": hyper_reg_coef,
         "sample_per_step": args.sample_per_step,
         "same_noise_update": args.same_noise_update,
+        "batch_noise_update": args.batch_noise_update,
         "target_noise_std": args.target_noise_std,
         "action_sample_num": args.action_sample_num,
+        "action_select_scheme": args.action_select_scheme,
     }
     policy = NewRainbowPolicy(**policy_params).to(args.device)
 
@@ -240,7 +243,7 @@ def main(args=get_args()):
     )
     test_collector = Collector(policy, test_envs, exploration_noise=False)
     # policy.set_eps(1)
-    train_collector.collect(n_step=args.min_replay_size)
+    train_collector.collect(n_step=args.min_replay_size, random=True)
 
     # log
     log_name = f"{args.task[:-3].lower()}_{args.seed}_{time.strftime('%Y%m%d%H%M%S', time.localtime())}"

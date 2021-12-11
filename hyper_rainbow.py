@@ -12,7 +12,7 @@ from torch.utils.tensorboard import SummaryWriter
 
 from tianshou.data import Collector, PrioritizedVectorReplayBuffer, VectorReplayBuffer
 from tianshou.env import DummyVectorEnv
-from tianshou.policy import NewRainbowPolicy
+from tianshou.policy import NewRainbowPolicy, NewDQNPolicy
 from tianshou.trainer import offpolicy_trainer
 from tianshou.utils import TensorboardLogger
 from tianshou.utils.net.common import NewNet
@@ -78,7 +78,7 @@ def get_args():
     parser.add_argument('--noisy-std', type=float, default=0.1)
     parser.add_argument('--ensemble-num', type=int, default=0)
     parser.add_argument('--ensemble-sizes', type=int, nargs='*', default=[])
-    parser.add_argument('--hidden-sizes', type=int, nargs='*', default=[128, 128])
+    parser.add_argument('--hidden-sizes', type=int, nargs='*', default=[512, 512])
     parser.add_argument('--target-update-freq', type=int, default=100)
     parser.add_argument('--epoch', type=int, default=500)
     parser.add_argument('--step-per-epoch', type=int, default=1000)
@@ -183,9 +183,6 @@ def main(args=get_args()):
         "estimation_step": args.n_step,
         "target_update_freq": args.target_update_freq,
         "reward_normalization": args.norm_ret,
-        "num_atoms": args.num_atoms,
-        "v_min": -args.v_max,
-        "v_max": args.v_max,
         "ensemble_num": args.ensemble_num,
         "noise_std": args.noise_std,
         "noise_dim": args.noise_dim,
@@ -197,7 +194,11 @@ def main(args=get_args()):
         "action_sample_num": args.action_sample_num,
         "action_select_scheme": args.action_select_scheme,
     }
-    policy = NewRainbowPolicy(**policy_params).to(args.device)
+    if args.num_atoms > 1:
+        policy_params.update({"num_atoms": args.num_atoms, "v_min": -args.v_max, "v_max": args.v_max,})
+        policy = NewRainbowPolicy(**policy_params).to(args.device)
+    else:
+        policy = NewDQNPolicy(**policy_params).to(args.device)
 
     if args.evaluation:
         policy_name = f"{args.task[:-3].lower()}_{args.seed}_{args.policy_path}"

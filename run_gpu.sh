@@ -3,11 +3,13 @@
 task=$1
 seed=$3
 
+epoch=300
 size=10
 max_step=500
-epoch=500
-prior_std=1.0
-noise_dim=0
+num_atoms=51
+v_max=100
+prior_std=2.0
+noise_dim=2
 ensemble_num=0
 sample_per_step=False
 same_noise_update=True
@@ -19,6 +21,8 @@ config="{
     'size':${size}, \
     'max_step':${max_step}, \
     'epoch':${epoch}, \
+    'num_atoms':${num_atoms}, \
+    'v_max':${v_max}, \
     'prior_std':${prior_std}, \
     'noise_dim':${noise_dim}, \
     'ensemble_num':${ensemble_num}, \
@@ -35,7 +39,7 @@ export CUDA_VISIBLE_DEVICES=$2
 for i in $(seq 5)
 do
     tag=$(date "+%Y%m%d%H%M%S")
-    python hyper_rainbow.py --task ${task} --seed ${seed} --config "${config}" --logdir '~/results' > ~/logs/${task}_${tag}_3.out 2> ~/logs/${task}_${tag}_3.err &
+    python hyper_rainbow.py --task ${task} --seed ${seed} --config "${config}" > ~/logs/${task}_${tag}_3.out 2> ~/logs/${task}_${tag}_3.err &
     echo "run $seed $tag"
     let seed=$seed+1
     sleep ${time}

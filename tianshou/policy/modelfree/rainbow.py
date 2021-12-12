@@ -208,19 +208,20 @@ class NewRainbowPolicy(C51Policy):
                         self.noise_test = self.sample_noise(noise_num)
                     noise = self.noise_test
             logits, h = model(obs_, state=state, noise=noise, info=batch.info) # (None, num_atoms)
-        q = self.compute_q_value(logits, getattr(obs, "mask", None))  # (None,) or (None, ensemble_num)
+        q = self.compute_q_value(logits, getattr(obs, "mask", None))  # (None, action_num) or (None, ensemble_num, action_num)
         if not hasattr(self, "max_action_num"):
             self.max_action_num = q.shape[-1]
         if self.action_sample_num and not self.updating:
-            q_ = q.squeeze(0)
-            logits_ = logits.squeeze(0)
+            q_ = q.squeeze(0) # (None, action_sum)
+            logits_ = logits.squeeze(0) # (None, action_sum, num_atoms)
             if self.action_select_scheme == "MAX":
                 act = to_numpy(torch.argmax(q_) % self.max_action_num).reshape(1)
             elif self.action_select_scheme == "VIDS":
                 value_gap = q_.max(dim=-1, keepdim=True)[0] - q_
+                value_gap = (value_gap - value_gap.min(dim=-1, keepdim=True)[0]) / (value_gap.max(dim=-1, keepdim=True)[0] - value_gap.min(dim=-1, keepdim=True)[0])
                 value_gap = value_gap.mean(dim=0) + self.value_gap_eps
-                value_var = torch.var(logits_, dim=0)
-                value_var = value_var.mean(dim=1) + self.value_var_eps
+                value_var = torch.var(logits_, dim=0) # (action_sum, num_atoms)
+                value_var = value_var.sum(dim=1) + self.value_var_eps
                 act = to_numpy(torch.argmin(value_gap / value_var)).reshape(1)
             else:
                 raise ValueError(self.action_select_scheme)

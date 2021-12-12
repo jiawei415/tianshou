@@ -361,6 +361,7 @@ class NewDQNPolicy(BasePolicy):
                 act = to_numpy(torch.argmax(q_) % self.max_action_num).reshape(1)
             elif self.action_select_scheme == "VIDS":
                 value_gap = q_.max(dim=-1, keepdim=True)[0] - q_
+                value_gap = (value_gap - value_gap.min(dim=-1, keepdim=True)[0]) / (value_gap.max(dim=-1, keepdim=True)[0] - value_gap.min(dim=-1, keepdim=True)[0])
                 value_gap = value_gap.mean(dim=0) + self.value_gap_eps
                 value_var = torch.var(logits_, dim=0) + self.value_var_eps
                 act = to_numpy(torch.argmin(value_gap / value_var)).reshape(1)

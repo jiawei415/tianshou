@@ -39,7 +39,7 @@ export CUDA_VISIBLE_DEVICES=$2
 for i in $(seq 5)
 do
     tag=$(date "+%Y%m%d%H%M%S")
-    python hyper_rainbow.py --task ${task} --seed ${seed} --config "${config}" > ~/logs/${task}_${tag}_3.out 2> ~/logs/${task}_${tag}_3.err &
+    python new_rainbow.py --task ${task} --seed ${seed} --config "${config}" > ~/logs/${task}_${tag}_3.out 2> ~/logs/${task}_${tag}_3.err &
     echo "run $seed $tag"
     let seed=$seed+1
     sleep ${time}

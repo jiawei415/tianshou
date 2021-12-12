@@ -202,7 +202,7 @@ def main(args=get_args()):
 
     if args.evaluation:
         policy_name = f"{args.task[:-3].lower()}_{args.seed}_{args.policy_path}"
-        policy_path =  os.path.join(args.logdir, "hypermodel", args.task, policy_name, 'policy.pth')
+        policy_path =  os.path.join(args.logdir, "newrainbow", args.task, policy_name, 'policy.pth')
         print(f"Loading policy under {policy_path}")
         if os.path.exists(policy_path):
             model = torch.load(policy_path, map_location=args.device)
@@ -248,7 +248,7 @@ def main(args=get_args()):
 
     # log
     log_name = f"{args.task[:-3].lower()}_{args.seed}_{time.strftime('%Y%m%d%H%M%S', time.localtime())}"
-    log_path = os.path.join(os.path.dirname(os.path.realpath(__file__)), args.logdir, "hypermodel", args.task, log_name)
+    log_path = os.path.join(os.path.dirname(os.path.realpath(__file__)), args.logdir, "newrainbow", args.task, log_name)
     writer = SummaryWriter(log_path)
     logger = TensorboardLogger(writer, save_interval=args.save_interval)
     with open(os.path.join(log_path, "config.json"), "wt") as f:
@@ -296,15 +296,15 @@ def main(args=get_args()):
                 'optim': optim.state_dict(),
             }, os.path.join(log_path, 'checkpoint.pth')
         )
-        pickle.dump(
-            train_collector.buffer,
-            open(os.path.join(log_path, 'train_buffer.pkl'), "wb")
-        )
+        # pickle.dump(
+        #     train_collector.buffer,
+        #     open(os.path.join(log_path, 'train_buffer.pkl'), "wb")
+        # )
 
     if args.resume:
         # load from existing checkpoint
         resume_name = f"{args.task[:-3].lower()}_{args.seed}_{args.resume_path}"
-        resume_path =  os.path.join(args.logdir, "hypermodel", args.task, resume_name)
+        resume_path =  os.path.join(args.logdir, "newrainbow", args.task, resume_name)
         print(f"Loading agent under {resume_path}")
         ckpt_path = os.path.join(resume_path, 'checkpoint.pth')
         if os.path.exists(ckpt_path):

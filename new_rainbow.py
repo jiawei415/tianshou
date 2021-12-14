@@ -80,7 +80,7 @@ def get_args():
     parser.add_argument('--ensemble-sizes', type=int, nargs='*', default=[])
     parser.add_argument('--hidden-sizes', type=int, nargs='*', default=[512, 512])
     parser.add_argument('--target-update-freq', type=int, default=100)
-    parser.add_argument('--epoch', type=int, default=500)
+    parser.add_argument('--epoch', type=int, default=1000)
     parser.add_argument('--step-per-epoch', type=int, default=1000)
     parser.add_argument('--step-per-collect', type=int, default=2)
     parser.add_argument('--update-per-step', type=int, default=1)

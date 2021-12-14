@@ -217,11 +217,11 @@ class NewRainbowPolicy(C51Policy):
             if self.action_select_scheme == "MAX":
                 act = to_numpy(torch.argmax(q_) % self.max_action_num).reshape(1)
             elif self.action_select_scheme == "VIDS":
-                value_gap = q_.max(dim=-1, keepdim=True)[0] - q_
-                value_gap = (value_gap - value_gap.min(dim=-1, keepdim=True)[0]) / (value_gap.max(dim=-1, keepdim=True)[0] - value_gap.min(dim=-1, keepdim=True)[0])
-                value_gap = value_gap.mean(dim=0) + self.value_gap_eps
+                value_gap = q_.max(dim=-1, keepdim=True)[0] - q_ # (None, action_sum)
+                value_gap /= self._v_max
+                value_gap = value_gap.mean(dim=0) + self.value_gap_eps # (action_sum,)
                 value_var = torch.var(logits_, dim=0) # (action_sum, num_atoms)
-                value_var = value_var.sum(dim=1) + self.value_var_eps
+                value_var = value_var.sum(dim=1) + self.value_var_eps # (action_sum,)
                 act = to_numpy(torch.argmin(value_gap / value_var)).reshape(1)
             else:
                 raise ValueError(self.action_select_scheme)

@@ -18,6 +18,16 @@ from tianshou.utils import TensorboardLogger
 from tianshou.utils.net.common import NewNet
 from tianshou.utils.net.discrete import NewNoisyLinear, NewHyperLinear, EnsembleLinear
 
+
+def init_ensemble_module(module):
+    import math
+    classname = module.__class__.__name__
+    if classname == "Linear":
+        bound = 1.0 / math.sqrt(module.in_features)
+        nn.init.trunc_normal_(module.weight, std=bound, a=-2*bound, b=2*bound)
+        nn.init.zeros_(module.bias)
+
+
 def init_model(model, method='uniform', bias=0.):
     if method == 'xavier':
         init_fn = nn.init.xavier_normal_
@@ -161,6 +171,8 @@ def main(args=get_args()):
         "dueling_param": ({ "linear_layer": last_linear}, {"linear_layer": last_linear})
     }
     model = NewNet(**model_params).to(args.device)
+    if args.ensemble_num > 0:
+        model.apply(init_ensemble_module)
     # model.apply(init_module)
     # init_model(model)
     print(f"Network structure:\n{str(model)}")
@@ -247,8 +259,14 @@ def main(args=get_args()):
     train_collector.collect(n_step=args.min_replay_size, random=True)
 
     # log
+    if args.ensemble_num:
+        alg_type = "ensemble"
+    elif args.noise_dim:
+        alg_type = "hyper"
+    elif args.noisy_std:
+        alg_type = "noisy"
     log_name = f"{args.task[:-3].lower()}_{args.seed}_{time.strftime('%Y%m%d%H%M%S', time.localtime())}"
-    log_path = os.path.join(os.path.dirname(os.path.realpath(__file__)), args.logdir, "newrainbow", args.task, log_name)
+    log_path = os.path.join(os.path.dirname(os.path.realpath(__file__)), args.logdir, args.task, alg_type, log_name)
     writer = SummaryWriter(log_path)
     logger = TensorboardLogger(writer, save_interval=args.save_interval)
     with open(os.path.join(log_path, "config.json"), "wt") as f:

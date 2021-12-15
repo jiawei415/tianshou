@@ -245,15 +245,15 @@ class NewRainbowPolicy(C51Policy):
             noise_num = batch['obs'].shape[0] if self.batch_noise_update else 1
             self.noise_update = self.sample_noise(noise_num)
             target_dist = self._target_dist(batch) # (None, num_atoms)
+            if self.target_noise_std and self.noise_dim:
+                update_noise = torch.cat([self.noise_update['Q']['hyper_noise'], self.noise_update['V']['hyper_noise']], dim=1)
+                target_noise = to_torch_as(batch.target_noise, update_noise)
+                loss_noise = torch.sum(target_noise.mul(update_noise).to(target_dist.device), dim=1, keepdim=True)
+                target_dist += loss_noise
             curr_dist = self(batch, noise=self.noise_update).logits # (None, action_num, num_atoms)
             act = batch.act # (None,)
             curr_dist = curr_dist[np.arange(len(act)), act, :] # (None, num_atoms)
             cross_entropy = -(target_dist * torch.log(curr_dist + 1e-8)).sum(-1) # (None,)
-            if self.target_noise_std and self.noise_dim:
-                update_noise = torch.cat([self.noise_update['Q']['hyper_noise'], self.noise_update['V']['hyper_noise']], dim=1)
-                target_noise = to_torch_as(batch.target_noise, update_noise)
-                loss_noise = torch.sum(target_noise.mul(update_noise).to(cross_entropy.device), dim=1)
-                cross_entropy += loss_noise
         weight = batch.pop("weight", 1.0)
         loss = (cross_entropy * weight).mean(0).sum()
         if self.hyper_reg_coef and self.noise_dim:

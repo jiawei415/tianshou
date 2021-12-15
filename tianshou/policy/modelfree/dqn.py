@@ -403,12 +403,12 @@ class NewDQNPolicy(BasePolicy):
             act = batch.act # (None,)
             q = q[np.arange(len(act)), act] # (None, )
             r = to_torch_as(batch.returns.flatten(), q) # (None, )
-            td = (r - q).pow(2) # (None,)
             if self.target_noise_std and self.noise_dim:
                 update_noise = torch.cat([self.noise_update['Q']['hyper_noise'], self.noise_update['V']['hyper_noise']], dim=1)
                 target_noise = to_torch_as(batch.target_noise, update_noise)
-                loss_noise = torch.sum(target_noise.mul(update_noise).to(td.device), dim=1)
-                td += loss_noise
+                loss_noise = torch.sum(target_noise.mul(update_noise).to(r.device), dim=1)
+                r += loss_noise
+            td = (r - q).pow(2) # (None,)
         weight = batch.pop("weight", 1.0)
         loss = (td * weight).mean(0).sum()
         if self.hyper_reg_coef and self.noise_dim:

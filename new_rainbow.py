@@ -88,6 +88,7 @@ def get_args():
     parser.add_argument('--noisy-std', type=float, default=0.1)
     parser.add_argument('--ensemble-num', type=int, default=0)
     parser.add_argument('--ensemble-sizes', type=int, nargs='*', default=[])
+    parser.add_argument('--ensemble-init', action="store_true", default=True)
     parser.add_argument('--hidden-sizes', type=int, nargs='*', default=[512, 512])
     parser.add_argument('--target-update-freq', type=int, default=100)
     parser.add_argument('--epoch', type=int, default=1000)
@@ -171,7 +172,7 @@ def main(args=get_args()):
         "dueling_param": ({ "linear_layer": last_linear}, {"linear_layer": last_linear})
     }
     model = NewNet(**model_params).to(args.device)
-    if args.ensemble_num > 0:
+    if args.ensemble_num > 0 and args.ensemble_init:
         model.apply(init_ensemble_module)
     # model.apply(init_module)
     # init_model(model)

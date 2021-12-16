@@ -1,5 +1,6 @@
 import argparse
 import os
+import math
 import time
 import json
 import pickle
@@ -14,17 +15,32 @@ from tianshou.data import Collector, PrioritizedVectorReplayBuffer, VectorReplay
 from tianshou.env import DummyVectorEnv
 from tianshou.policy import NewRainbowPolicy, NewDQNPolicy
 from tianshou.trainer import offpolicy_trainer
-from tianshou.utils import TensorboardLogger
+from tianshou.utils import TensorboardLogger, import_module_or_data, read_config_dict
 from tianshou.utils.net.common import NewNet
 from tianshou.utils.net.discrete import NewNoisyLinear, NewHyperLinear, EnsembleLinear
 
 
-def init_ensemble_module(module):
-    import math
+def trunc_normal_init(module):
     classname = module.__class__.__name__
     if classname == "Linear":
         bound = 1.0 / math.sqrt(module.in_features)
         nn.init.trunc_normal_(module.weight, std=bound, a=-2*bound, b=2*bound)
+        nn.init.zeros_(module.bias)
+
+
+def xavier_uniform_init(module):
+    classname = module.__class__.__name__
+    if classname == "Linear":
+        gain = 1.0
+        nn.init.xavier_uniform_(module.weight, gain=gain)
+        nn.init.zeros_(module.bias)
+
+
+def xavier_normal_init(module):
+    classname = module.__class__.__name__
+    if classname == "Linear":
+        gain = 1.0
+        nn.init.xavier_normal_(module.weight, gain=gain)
         nn.init.zeros_(module.bias)
 
 
@@ -40,19 +56,6 @@ def init_model(model, method='uniform', bias=0.):
             nn.init.constant(param, bias)
         if 'basedmodel' in name or 'priormodel.model' in name:
             init_fn(param)
-
-
-def init_module(module, method='uniform', bias=0.):
-    if method == 'xavier':
-        init_fn = nn.init.xavier_normal_
-    elif method == 'uniform':
-        init_fn = nn.init.xavier_uniform_
-    else:
-        raise NotImplementedError
-    classname = module.__class__.__name__
-    if classname == "Linear":
-        init_fn(module.weight)
-        nn.init.constant(module.bias, bias)
 
 
 def make_env(env_name, max_step=None, size=10, seed=2021):
@@ -71,7 +74,7 @@ def get_args():
     parser.add_argument('--seed', type=int, default=2021)
     parser.add_argument('--eps-test', type=float, default=0.)
     parser.add_argument('--eps-train', type=float, default=0.)
-    parser.add_argument('--buffer-size', type=int, default=50000)
+    parser.add_argument('--buffer-size', type=int, default=int(2e5))
     parser.add_argument('--min-replay-size', type=int, default=500)
     parser.add_argument('--lr', type=float, default=0.0001)
     parser.add_argument('--hyper-reg-coef', type=float, default=0.01)
@@ -82,14 +85,15 @@ def get_args():
     parser.add_argument('--num-atoms', type=int, default=51)
     parser.add_argument('--v-max', type=float, default=100.)
     parser.add_argument('--target-noise-std', type=float, default=0.)
+    parser.add_argument('--prior-scale', type=float, default=10.)
     parser.add_argument('--prior-std', type=float, default=0.)
     parser.add_argument('--noise-std', type=float, default=1.)
     parser.add_argument('--noise-dim', type=int, default=0)
     parser.add_argument('--noisy-std', type=float, default=0.1)
     parser.add_argument('--ensemble-num', type=int, default=0)
     parser.add_argument('--ensemble-sizes', type=int, nargs='*', default=[])
-    parser.add_argument('--ensemble-init', action="store_true", default=True)
-    parser.add_argument('--hidden-sizes', type=int, nargs='*', default=[512, 512])
+    parser.add_argument('--init-type', type=str, default=None, help="trunc_normal, xavier_uniform, xavier_normal")
+    parser.add_argument('--hidden-sizes', type=int, nargs='*', default=[64, 64])
     parser.add_argument('--target-update-freq', type=int, default=100)
     parser.add_argument('--epoch', type=int, default=1000)
     parser.add_argument('--step-per-epoch', type=int, default=1000)
@@ -109,7 +113,7 @@ def get_args():
     parser.add_argument('--resume-path', type=str, default='')
     parser.add_argument('--evaluation', action="store_true", default=False)
     parser.add_argument('--policy-path', type=str, default='')
-    parser.add_argument("--save-interval", type=int, default=4)
+    parser.add_argument('--save-interval', type=int, default=4)
     parser.add_argument('--device', type=str, default='cuda' if torch.cuda.is_available() else 'cpu')
     parser.add_argument('--sample-per-step', action="store_true", default=False)
     parser.add_argument('--same-noise-update', action="store_true", default=True)
@@ -136,10 +140,12 @@ def main(args=get_args()):
     # you can also use tianshou.env.SubprocVectorEnv
     train_envs = DummyVectorEnv([make_thunk(seed=args.seed)], norm_obs=args.norm_obs)
     test_envs = DummyVectorEnv([make_thunk(seed=args.seed)], norm_obs=args.norm_obs)
+    args.min_replay_size = args.max_step
     if 'DeepSea' in args.task:
         train_action_mappling = np.array([action_mapping() for action_mapping in train_envs.get_action_mapping])
         test_action_mappling = np.array([action_mapping() for action_mapping in test_envs.get_action_mapping])
         assert (train_action_mappling == test_action_mappling).all()
+        args.min_replay_size = args.size
     args.state_shape = train_envs.observation_space[0].shape or train_envs.observation_space[0].n
     args.action_shape = train_envs.action_space[0].shape or train_envs.action_space[0].n
 
@@ -152,11 +158,11 @@ def main(args=get_args()):
     # model
     def last_linear(x, y, device):
         if args.ensemble_num:
-            return EnsembleLinear(x, y, device, ensemble_num=args.ensemble_num, ensemble_sizes=args.ensemble_sizes, prior_std=args.prior_std)
+            return EnsembleLinear(x, y, device, ensemble_num=args.ensemble_num, ensemble_sizes=args.ensemble_sizes, prior_std=args.prior_std, prior_scale=args.prior_scale)
         elif args.noise_dim:
-            return NewHyperLinear(x, y, device, noise_dim=args.noise_dim, prior_std=args.prior_std, batch_noise=args.batch_noise_update)
+            return NewHyperLinear(x, y, device, noise_dim=args.noise_dim, prior_std=args.prior_std, prior_scale=args.prior_scale, batch_noise=args.batch_noise_update)
         elif args.noisy_std:
-            return NewNoisyLinear(x, y, device, noisy_std=args.noisy_std, prior_std=args.prior_std, batch_noise=args.batch_noise_update)
+            return NewNoisyLinear(x, y, device, noisy_std=args.noisy_std, prior_std=args.prior_std, prior_scale=args.prior_scale, batch_noise=args.batch_noise_update)
         else:
             NotImplementedError
 
@@ -172,9 +178,14 @@ def main(args=get_args()):
         "dueling_param": ({ "linear_layer": last_linear}, {"linear_layer": last_linear})
     }
     model = NewNet(**model_params).to(args.device)
-    if args.ensemble_num > 0 and args.ensemble_init:
-        model.apply(init_ensemble_module)
-    # model.apply(init_module)
+
+    if args.init_type == "trunc_normal":
+        model.apply(trunc_normal_init)
+    elif args.init_type == "xavier_uniform":
+        model.apply(xavier_uniform_init)
+    elif args.init_type == "xavier_normal":
+        model.apply(xavier_normal_init)
+
     # init_model(model)
     print(f"Network structure:\n{str(model)}")
 
@@ -367,8 +378,11 @@ def main(args=get_args()):
 
 if __name__ == '__main__':
     args = get_args()
-    config = eval(args.config)
-    for k, v in config.items():
+    env_name = args.task[:-3].lower()
+    config = read_config_dict(args.config)
+    alg_config = import_module_or_data(f"tianshou.config.{env_name}_config.alg_config")
+    alg_config.update(config)
+    for k, v in alg_config.items():
         if k not in args.__dict__.keys():
             print(f'unrecognized config k: {k}, v: {v}, ignored')
             continue

@@ -617,7 +617,6 @@ class NewPriorNoisyLinear(nn.Module):
     ) -> None:
         super().__init__()
 
-        # Learnable parameters.
         weight_shape = (in_features, out_features) if batch_noise else (out_features, in_features)
         bias_shape = (1, out_features) if batch_noise else (out_features, )
         self.mu_W = nn.Parameter(torch.FloatTensor(size=weight_shape))
@@ -688,6 +687,8 @@ class NewNoisyLinear(nn.Module):
 
         if prior_std:
             self.priormodel = NewPriorNoisyLinear(in_features, out_features, noisy_std=noisy_std, batch_noise=batch_noise)
+            for param in self.priormodel.parameters():
+                param.requires_grad = False
 
         self.base_forward = getattr(self, "base_forward_v1") if batch_noise else getattr(self, "base_forward_v2")
 
@@ -762,6 +763,8 @@ class NewHyperLinear(nn.Module):
         self.hypermodel = nn.Linear(inp_dim, out_dim)
         if prior_std > 0:
             self.priormodel = PriorHyperLinear(inp_dim, out_dim, prior_std=prior_std)
+            for param in self.priormodel.parameters():
+                param.requires_grad = False
 
         self.base_forward = getattr(self, "base_forward_v1") if batch_noise else getattr(self, "base_forward_v2")
 
@@ -828,9 +831,11 @@ class EnsembleLinear(nn.Module):
             self.mlp(in_features, out_features, ensemble_sizes) for _ in range(ensemble_num)
         ])
         if prior_std:
-            self.prior_model = nn.ModuleList([
+            self.priormodel = nn.ModuleList([
                 self.mlp(in_features, out_features, ensemble_sizes) for _ in range(ensemble_num)
             ])
+            for param in self.priormodel.parameters():
+                param.requires_grad = False
 
         self.device = device
         self.ensemble_num = ensemble_num
@@ -855,13 +860,13 @@ class EnsembleLinear(nn.Module):
             out = [self.basedmodel[k](x) for k in active_head]
             out = torch.stack(out, dim=1)
             if prior_x is not None and self.prior_std > 0:
-                prior_out = [self.prior_model[k](x) for k in active_head]
+                prior_out = [self.priormodel[k](x) for k in active_head]
                 prior_out = torch.stack(prior_out, dim=1)
                 out += prior_out * self.prior_std
         else:
             out = self.basedmodel[active_head](x)
             if prior_x is not None and self.prior_std > 0:
-                prior_out = self.prior_model[active_head](x)
+                prior_out = self.priormodel[active_head](x)
                 out += prior_out * self.prior_scale
         return out
 

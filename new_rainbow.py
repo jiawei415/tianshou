@@ -92,6 +92,7 @@ def get_args():
     parser.add_argument('--noisy-std', type=float, default=0.1)
     parser.add_argument('--ensemble-num', type=int, default=0)
     parser.add_argument('--ensemble-sizes', type=int, nargs='*', default=[])
+    parser.add_argument('--use-dueling', action="store_true", default=True)
     parser.add_argument('--init-type', type=str, default=None, help="trunc_normal, xavier_uniform, xavier_normal")
     parser.add_argument('--hidden-sizes', type=int, nargs='*', default=[64, 64])
     parser.add_argument('--target-update-freq', type=int, default=100)
@@ -175,8 +176,11 @@ def main(args=get_args()):
         "num_atoms": args.num_atoms,
         "prior_std": args.prior_std,
         "ensemble_num": args.ensemble_num,
-        "dueling_param": ({ "linear_layer": last_linear}, {"linear_layer": last_linear})
     }
+    if args.use_dueling:
+        model_params['last_layer'] = ({ "linear_layer": last_linear}, {"linear_layer": last_linear})
+    else:
+        model_params['last_layer'] = ({ "linear_layer": last_linear})
     model = NewNet(**model_params).to(args.device)
 
     if args.init_type == "trunc_normal":

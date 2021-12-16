@@ -233,7 +233,7 @@ class NewDQNPolicy(BasePolicy):
         self._is_double = is_double
 
         self.last_layer_inp_dim = model.basedmodel.output_dim
-        self.v_out_dim = model.V.output_dim
+        self.v_out_dim = model.V.output_dim if hasattr(model, "V") else 0
         self.q_out_dim = model.Q.output_dim
         self.noise_dim = noise_dim
         self.noise_std = noise_std
@@ -412,7 +412,9 @@ class NewDQNPolicy(BasePolicy):
         weight = batch.pop("weight", 1.0)
         loss = (td * weight).mean(0).sum()
         if self.hyper_reg_coef and self.noise_dim:
-            reg_loss = self.model.Q.model.regularization(self.noise_update['Q']) + self.model.V.model.regularization(self.noise_update['V'])
+            reg_loss = self.model.Q.model.regularization(self.noise_update['Q'])
+            if self.v_out_dim:
+                reg_loss += self.model.V.model.regularization(self.noise_update['V'])
             loss += reg_loss * (self.hyper_reg_coef / kwargs['sample_num'])
         batch.weight = td  # prio-buffer
         self.optim.zero_grad()

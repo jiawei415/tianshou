@@ -277,8 +277,7 @@ class NewNet(nn.Module):
         num_atoms: int = 1,
         ensemble_num: int = 0,
         prior_std: float = 0.,
-        dueling_param: Optional[Tuple[Dict[str, Any], Dict[str, Any]]] = None,
-        ensemble_param: Optional[Tuple[Dict[str, Any], Dict[str, Any]]] = None,
+        last_layer: Optional[Tuple[Dict[str, Any], Dict[str, Any]]] = None,
     ) -> None:
         super().__init__()
         self.device = device
@@ -290,21 +289,20 @@ class NewNet(nn.Module):
         action_dim = int(np.prod(action_shape)) * num_atoms
         if concat:
             input_dim += action_dim
-        self.use_dueling = dueling_param is not None
-        self.use_ensemble = bool(ensemble_num) or ensemble_param is not None
-        output_dim = action_dim if not self.use_dueling and not concat else 0
+        self.use_dueling = len(last_layer) > 1
+        self.use_ensemble = ensemble_num > 1
         self.basedmodel = MLP(
-            input_dim, output_dim, hidden_sizes, norm_layer, activation, device
+            input_dim, 0, hidden_sizes, norm_layer, activation, device
         )
         if self.prior_std:
             self.priormodel = MLP(
-                input_dim, output_dim, hidden_sizes, norm_layer, activation, device
+                input_dim, 0, hidden_sizes, norm_layer, activation, device
             )
             for param in self.priormodel.parameters():
                 param.requires_grad = False
         self.output_dim = self.basedmodel.output_dim
         if self.use_dueling:  # dueling DQN
-            q_kwargs, v_kwargs = dueling_param  # type: ignore
+            q_kwargs, v_kwargs = last_layer  # type: ignore
             q_output_dim, v_output_dim = 0, 0
             if not concat:
                 q_output_dim, v_output_dim = action_dim, num_atoms
@@ -322,14 +320,14 @@ class NewNet(nn.Module):
             }
             self.Q, self.V = LastMLP(**q_kwargs), LastMLP(**v_kwargs)
             self.output_dim = self.Q.output_dim
-        elif self.use_ensemble:
-            q_kwargs = ensemble_param  # type: ignore
-            q_output_dim = int(np.prod(action_shape))
+        else:
+            q_kwargs = last_layer  # type: ignore
+            q_output_dim = action_dim
             q_kwargs: Dict[str, Any] = {
                 **q_kwargs, "input_dim": self.output_dim,
                 "output_dim": q_output_dim,
                 "device": self.device,
-                "ensemble": True
+                "ensemble": self.use_ensemble
             }
             self.Q = LastMLP(**q_kwargs)
 
@@ -357,11 +355,16 @@ class NewNet(nn.Module):
                 q = q.view(bsz, -1, self.action_num).squeeze(dim=1)
                 v = v.view(bsz, -1, 1).squeeze(dim=1)
             logits = q - q.mean(dim=1, keepdim=True) + v
-        elif self.use_ensemble:
-            q = self.Q(logits, prior_logits, active_head=active_head)
+        else:
+            if self.use_ensemble:
+                q = self.Q(logits, prior_logits, active_head=active_head)
+            else:
+                q = self.Q(logits, prior_logits, noise=noise['Q'])
+            if self.num_atoms > 1:
+                q = q.view(bsz, -1, self.action_num, self.num_atoms).squeeze(dim=1)
+            else:
+                q = q.view(bsz, -1, self.action_num).squeeze(dim=1)
             logits = q
-        elif self.num_atoms > 1:
-            logits = logits.view(bsz, -1, self.num_atoms)
         if self.softmax:
             logits = torch.softmax(logits, dim=-1)
         return logits, state

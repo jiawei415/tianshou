@@ -1,5 +1,4 @@
 alg_config = dict(
-    v_max=100,
     based_weight_decay=0.0003125,
     hyper_weight_decay=0.,
     hyper_reg_coef=0.01,

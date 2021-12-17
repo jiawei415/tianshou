@@ -74,8 +74,8 @@ def get_args():
     parser.add_argument('--seed', type=int, default=2021)
     parser.add_argument('--eps-test', type=float, default=0.)
     parser.add_argument('--eps-train', type=float, default=0.)
+    parser.add_argument('--batch-size', type=int, default=128)
     parser.add_argument('--buffer-size', type=int, default=int(2e5))
-    parser.add_argument('--min-replay-size', type=int, default=500)
     parser.add_argument('--lr', type=float, default=0.0001)
     parser.add_argument('--hyper-reg-coef', type=float, default=0.01)
     parser.add_argument('--hyper-weight-decay', type=float, default=0.0003125)
@@ -84,24 +84,23 @@ def get_args():
     parser.add_argument('--n-step', type=int, default=3)
     parser.add_argument('--num-atoms', type=int, default=51)
     parser.add_argument('--v-max', type=float, default=100.)
-    parser.add_argument('--target-noise-std', type=float, default=0.)
     parser.add_argument('--prior-scale', type=float, default=10.)
     parser.add_argument('--prior-std', type=float, default=0.)
+    parser.add_argument('--target-noise-std', type=float, default=0.)
     parser.add_argument('--noise-std', type=float, default=1.)
     parser.add_argument('--noise-dim', type=int, default=0)
     parser.add_argument('--noisy-std', type=float, default=0.1)
-    parser.add_argument('--ensemble-num', type=int, default=0)
+    parser.add_argument('--ensemble-num', type=int, default=2)
     parser.add_argument('--ensemble-sizes', type=int, nargs='*', default=[])
+    parser.add_argument('--hidden-sizes', type=int, nargs='*', default=[64, 64])
     parser.add_argument('--use-dueling', action="store_true", default=True)
     parser.add_argument('--init-type', type=str, default=None, help="trunc_normal, xavier_uniform, xavier_normal")
-    parser.add_argument('--hidden-sizes', type=int, nargs='*', default=[64, 64])
-    parser.add_argument('--target-update-freq', type=int, default=100)
     parser.add_argument('--epoch', type=int, default=1000)
     parser.add_argument('--step-per-epoch', type=int, default=1000)
     parser.add_argument('--step-per-collect', type=int, default=2)
     parser.add_argument('--update-per-step', type=int, default=1)
-    parser.add_argument('--batch-size', type=int, default=128)
     parser.add_argument('--episode-per-test', type=int, default=10)
+    parser.add_argument('--target-update-freq', type=int, default=100)
     parser.add_argument('--logdir', type=str, default='results')
     parser.add_argument('--render', type=float, default=0.)
     parser.add_argument('--norm-obs', action="store_true", default=False)
@@ -141,12 +140,10 @@ def main(args=get_args()):
     # you can also use tianshou.env.SubprocVectorEnv
     train_envs = DummyVectorEnv([make_thunk(seed=args.seed)], norm_obs=args.norm_obs)
     test_envs = DummyVectorEnv([make_thunk(seed=args.seed)], norm_obs=args.norm_obs)
-    args.min_replay_size = args.max_step
     if 'DeepSea' in args.task:
         train_action_mappling = np.array([action_mapping() for action_mapping in train_envs.get_action_mapping])
         test_action_mappling = np.array([action_mapping() for action_mapping in test_envs.get_action_mapping])
         assert (train_action_mappling == test_action_mappling).all()
-        args.min_replay_size = args.size
     args.state_shape = train_envs.observation_space[0].shape or train_envs.observation_space[0].n
     args.action_shape = train_envs.action_space[0].shape or train_envs.action_space[0].n
 
@@ -157,13 +154,13 @@ def main(args=get_args()):
     test_envs.seed(args.seed)
 
     # model
-    def last_linear(x, y, device):
+    def last_linear(x, y):
         if args.ensemble_num:
-            return EnsembleLinear(x, y, device, ensemble_num=args.ensemble_num, ensemble_sizes=args.ensemble_sizes, prior_std=args.prior_std, prior_scale=args.prior_scale)
+            return EnsembleLinear(x, y, device=args.device, ensemble_num=args.ensemble_num, ensemble_sizes=args.ensemble_sizes, prior_std=args.prior_std, prior_scale=args.prior_scale)
         elif args.noise_dim:
-            return NewHyperLinear(x, y, device, noise_dim=args.noise_dim, prior_std=args.prior_std, prior_scale=args.prior_scale, batch_noise=args.batch_noise_update)
+            return NewHyperLinear(x, y, device=args.device, noise_dim=args.noise_dim, prior_std=args.prior_std, prior_scale=args.prior_scale, batch_noise=args.batch_noise_update)
         elif args.noisy_std:
-            return NewNoisyLinear(x, y, device, noisy_std=args.noisy_std, prior_std=args.prior_std, prior_scale=args.prior_scale, batch_noise=args.batch_noise_update)
+            return NewNoisyLinear(x, y, device=args.device, noisy_std=args.noisy_std, prior_std=args.prior_std, prior_scale=args.prior_scale, batch_noise=args.batch_noise_update)
         else:
             NotImplementedError
 
@@ -175,7 +172,7 @@ def main(args=get_args()):
         "softmax": True,
         "num_atoms": args.num_atoms,
         "prior_std": args.prior_std,
-        "ensemble_num": args.ensemble_num,
+        "use_ensemble": bool(args.ensemble_num),
     }
     if args.use_dueling:
         model_params['last_layer'] = ({ "linear_layer": last_linear}, {"linear_layer": last_linear})
@@ -272,7 +269,7 @@ def main(args=get_args()):
     )
     test_collector = Collector(policy, test_envs, exploration_noise=False)
     # policy.set_eps(1)
-    train_collector.collect(n_step=args.min_replay_size, random=True)
+    train_collector.collect(n_step=args.batch_size, random=True)
 
     # log
     if args.ensemble_num:

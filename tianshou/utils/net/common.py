@@ -139,7 +139,7 @@ class LastMLP(nn.Module):
         super().__init__()
         self.device = device
         self.output_dim = output_dim
-        self.model = linear_layer(input_dim, output_dim, device)
+        self.model = linear_layer(input_dim, output_dim)
         self.ensemble = ensemble
 
     def forward(self, s: Union[np.ndarray, torch.Tensor], prior_s=None, active_head=None, noise: Dict[str, Any] = {}) -> torch.Tensor:
@@ -275,8 +275,8 @@ class NewNet(nn.Module):
         softmax: bool = False,
         concat: bool = False,
         num_atoms: int = 1,
-        ensemble_num: int = 0,
         prior_std: float = 0.,
+        use_ensemble: bool = False,
         last_layer: Optional[Tuple[Dict[str, Any], Dict[str, Any]]] = None,
     ) -> None:
         super().__init__()
@@ -290,7 +290,7 @@ class NewNet(nn.Module):
         if concat:
             input_dim += action_dim
         self.use_dueling = len(last_layer) > 1
-        self.use_ensemble = ensemble_num > 1
+        self.use_ensemble = use_ensemble
         self.basedmodel = MLP(
             input_dim, 0, hidden_sizes, norm_layer, activation, device
         )

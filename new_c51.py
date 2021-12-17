@@ -13,10 +13,10 @@ from torch.utils.tensorboard import SummaryWriter
 
 from tianshou.data import Collector, PrioritizedVectorReplayBuffer, VectorReplayBuffer
 from tianshou.env import DummyVectorEnv
-from tianshou.policy import NewRainbowPolicy, NewDQNPolicy
+from tianshou.policy import NewRainbowPolicy, NewDQNPolicy, C51Policy
 from tianshou.trainer import offpolicy_trainer
 from tianshou.utils import TensorboardLogger, import_module_or_data, read_config_dict
-from tianshou.utils.net.common import NewNet
+from tianshou.utils.net.common import NewNet, Net
 from tianshou.utils.net.discrete import NewNoisyLinear, NewHyperLinear, EnsembleLinear
 
 
@@ -73,10 +73,9 @@ def get_args():
     parser.add_argument('--size', type=int, default=10)
     parser.add_argument('--seed', type=int, default=2021)
     parser.add_argument('--eps-test', type=float, default=0.)
-    parser.add_argument('--eps-train', type=float, default=0.)
+    parser.add_argument('--eps-train', type=float, default=0.1)
     parser.add_argument('--batch-size', type=int, default=128)
     parser.add_argument('--buffer-size', type=int, default=int(2e5))
-    parser.add_argument('--min-buffer-size', type=int, default=500)
     parser.add_argument('--lr', type=float, default=0.0001)
     parser.add_argument('--hyper-reg-coef', type=float, default=0.01)
     parser.add_argument('--hyper-weight-decay', type=float, default=0.0003125)
@@ -90,7 +89,7 @@ def get_args():
     parser.add_argument('--target-noise-std', type=float, default=0.)
     parser.add_argument('--noise-std', type=float, default=1.)
     parser.add_argument('--noise-dim', type=int, default=0)
-    parser.add_argument('--noisy-std', type=float, default=0.1)
+    parser.add_argument('--noisy-std', type=float, default=0)
     parser.add_argument('--ensemble-num', type=int, default=2)
     parser.add_argument('--ensemble-sizes', type=int, nargs='*', default=[])
     parser.add_argument('--hidden-sizes', type=int, nargs='*', default=[64, 64])
@@ -165,21 +164,32 @@ def main(args=get_args()):
         else:
             NotImplementedError
 
-    model_params = {
-        "state_shape": args.state_shape,
-        "action_shape": args.action_shape,
-        "hidden_sizes": args.hidden_sizes,
-        "device": args.device,
-        "softmax": True,
-        "num_atoms": args.num_atoms,
-        "prior_std": args.prior_std,
-        "use_ensemble": bool(args.ensemble_num),
-    }
-    if args.use_dueling:
-        model_params['last_layer'] = ({ "linear_layer": last_linear}, {"linear_layer": last_linear})
+    if args.noisy_std:
+        model_params = {
+            "state_shape": args.state_shape,
+            "action_shape": args.action_shape,
+            "hidden_sizes": args.hidden_sizes,
+            "device": args.device,
+            "softmax": True,
+            "num_atoms": args.num_atoms,
+            "prior_std": args.prior_std,
+            "use_ensemble": bool(args.ensemble_num),
+        }
+        if args.use_dueling:
+            model_params['last_layer'] = ({ "linear_layer": last_linear}, {"linear_layer": last_linear})
+        else:
+            model_params['last_layer'] = ({ "linear_layer": last_linear})
+        model = NewNet(**model_params).to(args.device)
     else:
-        model_params['last_layer'] = ({ "linear_layer": last_linear})
-    model = NewNet(**model_params).to(args.device)
+        model = Net(
+            args.state_shape,
+            args.action_shape,
+            hidden_sizes=args.hidden_sizes,
+            device=args.device,
+            softmax=True,
+            num_atoms=args.num_atoms,
+            dueling_param=({ "linear_layer": nn.Linear}, {"linear_layer": nn.Linear})
+        )
 
     if args.init_type == "trunc_normal":
         model.apply(trunc_normal_init)
@@ -201,30 +211,42 @@ def main(args=get_args()):
     optim = torch.optim.Adam(trainable_params, lr=args.lr)
 
     # policy
-    hyper_reg_coef = args.hyper_reg_coef / (args.prior_std ** 2) if args.prior_std else args.hyper_reg_coef
-    policy_params = {
-        "model": model,
-        "optim": optim,
-        "discount_factor": args.gamma,
-        "estimation_step": args.n_step,
-        "target_update_freq": args.target_update_freq,
-        "reward_normalization": args.norm_ret,
-        "ensemble_num": args.ensemble_num,
-        "noise_std": args.noise_std,
-        "noise_dim": args.noise_dim,
-        "hyper_reg_coef": hyper_reg_coef,
-        "sample_per_step": args.sample_per_step,
-        "same_noise_update": args.same_noise_update,
-        "batch_noise_update": args.batch_noise_update,
-        "target_noise_std": args.target_noise_std,
-        "action_sample_num": args.action_sample_num,
-        "action_select_scheme": args.action_select_scheme,
-    }
-    if args.num_atoms > 1:
-        policy_params.update({"num_atoms": args.num_atoms, "v_min": -args.v_max, "v_max": args.v_max,})
-        policy = NewRainbowPolicy(**policy_params).to(args.device)
+    if args.noisy_std:
+        hyper_reg_coef = args.hyper_reg_coef / (args.prior_std ** 2) if args.prior_std else args.hyper_reg_coef
+        policy_params = {
+            "model": model,
+            "optim": optim,
+            "discount_factor": args.gamma,
+            "estimation_step": args.n_step,
+            "target_update_freq": args.target_update_freq,
+            "reward_normalization": args.norm_ret,
+            "ensemble_num": args.ensemble_num,
+            "noise_std": args.noise_std,
+            "noise_dim": args.noise_dim,
+            "hyper_reg_coef": hyper_reg_coef,
+            "sample_per_step": args.sample_per_step,
+            "same_noise_update": args.same_noise_update,
+            "batch_noise_update": args.batch_noise_update,
+            "target_noise_std": args.target_noise_std,
+            "action_sample_num": args.action_sample_num,
+            "action_select_scheme": args.action_select_scheme,
+        }
+        if args.num_atoms > 1:
+            policy_params.update({"num_atoms": args.num_atoms, "v_min": -args.v_max, "v_max": args.v_max,})
+            policy = NewRainbowPolicy(**policy_params).to(args.device)
+        else:
+            policy = NewDQNPolicy(**policy_params).to(args.device)
     else:
-        policy = NewDQNPolicy(**policy_params).to(args.device)
+        policy = C51Policy(
+            model=model,
+            optim=optim,
+            discount_factor=args.gamma,
+            num_atoms=args.num_atoms,
+            v_min=-args.v_max,
+            v_max=args.v_max,
+            estimation_step=args.n_step,
+            target_update_freq=args.target_update_freq
+        ).to(args.device)
 
     if args.evaluation:
         policy_name = f"{args.task[:-3].lower()}_{args.seed}_{args.policy_path}"
@@ -273,12 +295,7 @@ def main(args=get_args()):
     train_collector.collect(n_step=args.min_buffer_size, random=True)
 
     # log
-    if args.ensemble_num:
-        alg_type = "ensemble"
-    elif args.noise_dim:
-        alg_type = "hyper"
-    elif args.noisy_std:
-        alg_type = "noisy"
+    alg_type = "c51"
     log_name = f"{args.task[:-3].lower()}_{args.seed}_{time.strftime('%Y%m%d%H%M%S', time.localtime())}"
     log_path = os.path.join(os.path.dirname(os.path.realpath(__file__)), args.logdir, args.task, alg_type, log_name)
     writer = SummaryWriter(log_path)
@@ -381,7 +398,7 @@ def main(args=get_args()):
 if __name__ == '__main__':
     args = get_args()
     env_name = args.task[:-3].lower()
-    args.min_buffer_size = args.size if env_name.startswith('deepsea') else args.max_step
+    args.min_buffer_size = args.size if env_name.startswith('DeepSea') else args.max_step
     config = read_config_dict(args.config)
     alg_config = import_module_or_data(f"tianshou.config.{env_name}_config.alg_config")
     alg_config.update(config)

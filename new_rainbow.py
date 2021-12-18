@@ -174,17 +174,14 @@ def main(args=get_args()):
     }
     if args.ensemble_num:
         args.alg_type = f"Ensemble"
-        args.noise_dim = args.noisy_std = 0
         last_layer_params.update({'ensemble_num': args.ensemble_num, 'ensemble_sizes': args.ensemble_sizes})
         last_layer = EnsembleLinear
     elif args.noise_dim:
-        args.alg_type = f"Noise"
-        args.ensemble_num = args.noisy_std = 0
+        args.alg_type = f"Hyper"
         last_layer_params.update({'noise_dim': args.noise_dim, 'batch_noise': args.batch_noise_update})
         last_layer = NewHyperLinear
     elif args.noisy_std:
         args.alg_type = f"Noisy"
-        args.ensemble_num = args.noise_dim = 0
         last_layer_params.update({'noisy_std': args.noisy_std, 'batch_noise': args.batch_noise_update})
         last_layer = NewNoisyLinear
     def linear_layer(x, y):

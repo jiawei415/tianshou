@@ -1,11 +1,11 @@
 alg_config = dict(
+    target_update_freq=100,
+    hyper_reg_coef=0.01,
     based_weight_decay=0.0003125,
     hyper_weight_decay=0.,
-    hyper_reg_coef=0.01,
     prior_scale=1.,
-    init_type=None,
     hidden_sizes=[512,512],
-    target_update_freq=100,
+    init_type=None,
     step_per_collect=2,
 )
 

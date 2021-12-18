@@ -273,9 +273,9 @@ class NewNet(nn.Module):
         activation: Optional[ModuleType] = nn.ReLU,
         device: Union[str, int, torch.device] = "cpu",
         softmax: bool = False,
-        concat: bool = False,
         num_atoms: int = 1,
         prior_std: float = 0.,
+        use_dueling: bool = False,
         use_ensemble: bool = False,
         last_layer: Optional[Tuple[Dict[str, Any], Dict[str, Any]]] = None,
     ) -> None:
@@ -287,9 +287,7 @@ class NewNet(nn.Module):
         self.action_num = int(np.prod(action_shape))
         input_dim = int(np.prod(state_shape))
         action_dim = int(np.prod(action_shape)) * num_atoms
-        if concat:
-            input_dim += action_dim
-        self.use_dueling = len(last_layer) > 1
+        self.use_dueling = use_dueling
         self.use_ensemble = use_ensemble
         self.basedmodel = MLP(
             input_dim, 0, hidden_sizes, norm_layer, activation, device
@@ -300,36 +298,27 @@ class NewNet(nn.Module):
             )
             for param in self.priormodel.parameters():
                 param.requires_grad = False
-        self.output_dim = self.basedmodel.output_dim
+        q_kwargs = last_layer[0]  # type: ignore
+        q_output_dim = action_dim
+        q_kwargs: Dict[str, Any] = {
+            **q_kwargs, "input_dim": self.basedmodel.output_dim,
+            "output_dim": q_output_dim,
+            "device": self.device,
+            "ensemble": self.use_ensemble
+        }
+        self.Q = LastMLP(**q_kwargs)
+        self.output_dim = self.Q.output_dim
         if self.use_dueling:  # dueling DQN
-            q_kwargs, v_kwargs = last_layer  # type: ignore
-            q_output_dim, v_output_dim = 0, 0
-            if not concat:
-                q_output_dim, v_output_dim = action_dim, num_atoms
-            q_kwargs: Dict[str, Any] = {
-                **q_kwargs, "input_dim": self.output_dim,
-                "output_dim": q_output_dim,
-                "device": self.device,
-                "ensemble": self.use_ensemble
-            }
+            assert len(last_layer) > 1
+            v_kwargs = last_layer[1]  # type: ignore
+            v_output_dim = num_atoms
             v_kwargs: Dict[str, Any] = {
-                **v_kwargs, "input_dim": self.output_dim,
+                **v_kwargs, "input_dim": self.basedmodel.output_dim,
                 "output_dim": v_output_dim,
                 "device": self.device,
                 "ensemble": self.use_ensemble
             }
-            self.Q, self.V = LastMLP(**q_kwargs), LastMLP(**v_kwargs)
-            self.output_dim = self.Q.output_dim
-        else:
-            q_kwargs = last_layer  # type: ignore
-            q_output_dim = action_dim
-            q_kwargs: Dict[str, Any] = {
-                **q_kwargs, "input_dim": self.output_dim,
-                "output_dim": q_output_dim,
-                "device": self.device,
-                "ensemble": self.use_ensemble
-            }
-            self.Q = LastMLP(**q_kwargs)
+            self.V = LastMLP(**v_kwargs)
 
     def forward(
         self,

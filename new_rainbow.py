@@ -7,6 +7,7 @@ import pickle
 import pprint
 import gym
 import numpy as np
+from numpy.core.numeric import array_equal
 import torch
 import torch.nn as nn
 from torch.utils.tensorboard import SummaryWriter
@@ -68,63 +69,73 @@ def make_env(env_name, max_step=None, size=10, seed=2021):
 
 def get_args():
     parser = argparse.ArgumentParser()
+    # environment config
     parser.add_argument('--task', type=str, default='MountainCar-v0')
     parser.add_argument('--max-step', type=int, default=500)
     parser.add_argument('--size', type=int, default=10)
     parser.add_argument('--seed', type=int, default=2021)
-    parser.add_argument('--eps-test', type=float, default=0.)
-    parser.add_argument('--eps-train', type=float, default=0.)
+    parser.add_argument('--norm-obs', action="store_true", default=False)
+    parser.add_argument('--norm-ret', action="store_true", default=False)
+    # training config
+    parser.add_argument('--same-noise-update', action="store_true", default=True)
+    parser.add_argument('--batch-noise-update', action="store_true", default=True)
+    parser.add_argument('--target-update-freq', type=int, default=100)
     parser.add_argument('--batch-size', type=int, default=128)
-    parser.add_argument('--buffer-size', type=int, default=int(2e5))
-    parser.add_argument('--min-buffer-size', type=int, default=500)
     parser.add_argument('--lr', type=float, default=0.0001)
     parser.add_argument('--hyper-reg-coef', type=float, default=0.01)
     parser.add_argument('--hyper-weight-decay', type=float, default=0.0003125)
     parser.add_argument('--based-weight-decay', type=float, default=0.0003125)
-    parser.add_argument('--gamma', type=float, default=0.99)
     parser.add_argument('--n-step', type=int, default=3)
-    parser.add_argument('--num-atoms', type=int, default=51)
+    parser.add_argument('--gamma', type=float, default=0.99)
     parser.add_argument('--v-max', type=float, default=100.)
+    parser.add_argument('--num-atoms', type=int, default=51)
+    # algorithm config
+    parser.add_argument('--noisy-std', type=float, default=0.1, help="Greater than 0 means using NoisyNet")
+    parser.add_argument('--noise-dim', type=int, default=0, help="Greater than 0 means using HyperModel")
+    parser.add_argument('--ensemble-num', type=int, default=0, help="Greater than 0 means using EnsembelNet")
+    parser.add_argument('--prior-std', type=float, default=0., help="Greater than 0 means using priormodel")
     parser.add_argument('--prior-scale', type=float, default=10.)
-    parser.add_argument('--prior-std', type=float, default=0.)
-    parser.add_argument('--target-noise-std', type=float, default=0.)
     parser.add_argument('--noise-std', type=float, default=1.)
-    parser.add_argument('--noise-dim', type=int, default=0)
-    parser.add_argument('--noisy-std', type=float, default=0.1)
-    parser.add_argument('--ensemble-num', type=int, default=2)
-    parser.add_argument('--ensemble-sizes', type=int, nargs='*', default=[])
+    parser.add_argument('--target-noise-std', type=float, default=0.)
+    # network config
     parser.add_argument('--hidden-sizes', type=int, nargs='*', default=[64, 64])
+    parser.add_argument('--ensemble-sizes', type=int, nargs='*', default=[])
     parser.add_argument('--use-dueling', action="store_true", default=True)
     parser.add_argument('--init-type', type=str, default=None, help="trunc_normal, xavier_uniform, xavier_normal")
+    # epoch config
     parser.add_argument('--epoch', type=int, default=1000)
     parser.add_argument('--step-per-epoch', type=int, default=1000)
     parser.add_argument('--step-per-collect', type=int, default=2)
     parser.add_argument('--update-per-step', type=int, default=1)
     parser.add_argument('--episode-per-test', type=int, default=10)
-    parser.add_argument('--target-update-freq', type=int, default=100)
-    parser.add_argument('--logdir', type=str, default='results')
-    parser.add_argument('--render', type=float, default=0.)
-    parser.add_argument('--norm-obs', action="store_true", default=False)
-    parser.add_argument('--norm-ret', action="store_true", default=False)
+    # buffer confing
+    parser.add_argument('--buffer-size', type=int, default=int(2e5))
+    parser.add_argument('--min-buffer-size', type=int, default=500)
     parser.add_argument('--prioritized', action="store_true", default=False)
     parser.add_argument('--alpha', type=float, default=0.6)
     parser.add_argument('--beta', type=float, default=0.4)
     parser.add_argument('--beta-final', type=float, default=1.)
-    parser.add_argument('--resume', action="store_true", default=False)
-    parser.add_argument('--resume-path', type=str, default='')
-    parser.add_argument('--evaluation', action="store_true", default=False)
-    parser.add_argument('--policy-path', type=str, default='')
-    parser.add_argument('--save-interval', type=int, default=4)
-    parser.add_argument('--device', type=str, default='cuda' if torch.cuda.is_available() else 'cpu')
+    # action selection confing
+    parser.add_argument('--eps-test', type=float, default=0.)
+    parser.add_argument('--eps-train', type=float, default=0.)
     parser.add_argument('--sample-per-step', action="store_true", default=False)
-    parser.add_argument('--same-noise-update', action="store_true", default=True)
-    parser.add_argument('--batch-noise-update', action="store_true", default=True)
     parser.add_argument('--action-sample-num', type=int, default=0)
     parser.add_argument('--action-select-scheme', type=str, default='MAX', help='MAX, VIDS')
     parser.add_argument('--value-gap-eps', type=float, default=1e-3)
     parser.add_argument('--value-var-eps', type=float, default=1e-3)
+    # other confing
+    parser.add_argument('--save-interval', type=int, default=4)
+    parser.add_argument('--save-buffer', action="store_true", default=False)
+    parser.add_argument('--logdir', type=str, default='~/results/tianshou')
+    parser.add_argument('--render', type=float, default=0.)
+    parser.add_argument('--resume', action="store_true", default=False)
+    parser.add_argument('--resume-path', type=str, default='')
+    parser.add_argument('--evaluation', action="store_true", default=False)
+    parser.add_argument('--policy-path', type=str, default='')
+    parser.add_argument('--device', type=str, default='cuda' if torch.cuda.is_available() else 'cpu')
+    # overwrite config
     parser.add_argument('--config', type=str, default="{}",
-                        help="game config eg., {'seed':2021,'size':20,'hidden_sizes':[128,128],'ensemble_num':4,'noise_dim':2,'prior_std':2,'hyper_reg_coef':0.01,}")
+                        help="game config eg., {'seed':2021,'size':20,'hidden_sizes':[128,128],'ensemble_num':4,'noise_dim':2,'prior_std':2,}")
     args = parser.parse_known_args()[0]
     return args
 
@@ -145,6 +156,7 @@ def main(args=get_args()):
         train_action_mappling = np.array([action_mapping() for action_mapping in train_envs.get_action_mapping])
         test_action_mappling = np.array([action_mapping() for action_mapping in test_envs.get_action_mapping])
         assert (train_action_mappling == test_action_mappling).all()
+        args.max_step = args.size
     args.state_shape = train_envs.observation_space[0].shape or train_envs.observation_space[0].n
     args.action_shape = train_envs.action_space[0].shape or train_envs.action_space[0].n
 
@@ -155,15 +167,28 @@ def main(args=get_args()):
     test_envs.seed(args.seed)
 
     # model
-    def last_linear(x, y):
-        if args.ensemble_num:
-            return EnsembleLinear(x, y, device=args.device, ensemble_num=args.ensemble_num, ensemble_sizes=args.ensemble_sizes, prior_std=args.prior_std, prior_scale=args.prior_scale)
-        elif args.noise_dim:
-            return NewHyperLinear(x, y, device=args.device, noise_dim=args.noise_dim, prior_std=args.prior_std, prior_scale=args.prior_scale, batch_noise=args.batch_noise_update)
-        elif args.noisy_std:
-            return NewNoisyLinear(x, y, device=args.device, noisy_std=args.noisy_std, prior_std=args.prior_std, prior_scale=args.prior_scale, batch_noise=args.batch_noise_update)
-        else:
-            NotImplementedError
+    last_layer_params = {
+        'device': args.device,
+        'prior_std': args.prior_std,
+        'prior_scale': args.prior_scale,
+    }
+    if args.ensemble_num:
+        args.alg_type = f"Ensemble"
+        args.noise_dim = args.noisy_std = 0
+        last_layer_params.update({'ensemble_num': args.ensemble_num, 'ensemble_sizes': args.ensemble_sizes})
+        last_layer = EnsembleLinear
+    elif args.noise_dim:
+        args.alg_type = f"Noise"
+        args.ensemble_num = args.noisy_std = 0
+        last_layer_params.update({'noise_dim': args.noise_dim, 'batch_noise': args.batch_noise_update})
+        last_layer = NewHyperLinear
+    elif args.noisy_std:
+        args.alg_type = f"Noisy"
+        args.ensemble_num = args.noise_dim = 0
+        last_layer_params.update({'noisy_std': args.noisy_std, 'batch_noise': args.batch_noise_update})
+        last_layer = NewNoisyLinear
+    def linear_layer(x, y):
+        return last_layer(x, y, **last_layer_params)
 
     model_params = {
         "state_shape": args.state_shape,
@@ -174,11 +199,12 @@ def main(args=get_args()):
         "num_atoms": args.num_atoms,
         "prior_std": args.prior_std,
         "use_ensemble": bool(args.ensemble_num),
+        "use_dueling": args.use_dueling,
     }
     if args.use_dueling:
-        model_params['last_layer'] = ({ "linear_layer": last_linear}, {"linear_layer": last_linear})
+        model_params['last_layer'] = ({ "linear_layer": linear_layer}, {"linear_layer": linear_layer})
     else:
-        model_params['last_layer'] = ({ "linear_layer": last_linear})
+        model_params['last_layer'] = ({ "linear_layer": linear_layer})
     model = NewNet(**model_params).to(args.device)
 
     if args.init_type == "trunc_normal":
@@ -227,8 +253,7 @@ def main(args=get_args()):
         policy = NewDQNPolicy(**policy_params).to(args.device)
 
     if args.evaluation:
-        policy_name = f"{args.task[:-3].lower()}_{args.seed}_{args.policy_path}"
-        policy_path =  os.path.join(args.logdir, "newrainbow", args.task, policy_name, 'policy.pth')
+        policy_path =  os.path.join(args.policy_path, 'policy.pth')
         print(f"Loading policy under {policy_path}")
         if os.path.exists(policy_path):
             model = torch.load(policy_path, map_location=args.device)
@@ -269,18 +294,11 @@ def main(args=get_args()):
         ensemble_num=args.ensemble_num
     )
     test_collector = Collector(policy, test_envs, exploration_noise=False)
-    # policy.set_eps(1)
     train_collector.collect(n_step=args.min_buffer_size, random=True)
 
     # log
-    if args.ensemble_num:
-        alg_type = "ensemble"
-    elif args.noise_dim:
-        alg_type = "hyper"
-    elif args.noisy_std:
-        alg_type = "noisy"
-    log_name = f"{args.task[:-3].lower()}_{args.seed}_{time.strftime('%Y%m%d%H%M%S', time.localtime())}"
-    log_path = os.path.join(os.path.dirname(os.path.realpath(__file__)), args.logdir, args.task, alg_type, log_name)
+    log_file = f"{args.task[:-3].lower()}_{args.seed}_{time.strftime('%Y%m%d%H%M%S', time.localtime())}"
+    log_path = os.path.join(args.logdir, args.task, args.alg_type.lower(), log_file)
     writer = SummaryWriter(log_path)
     logger = TensorboardLogger(writer, save_interval=args.save_interval)
     with open(os.path.join(log_path, "config.json"), "wt") as f:
@@ -328,15 +346,15 @@ def main(args=get_args()):
                 'optim': optim.state_dict(),
             }, os.path.join(log_path, 'checkpoint.pth')
         )
-        # pickle.dump(
-        #     train_collector.buffer,
-        #     open(os.path.join(log_path, 'train_buffer.pkl'), "wb")
-        # )
+        if args.save_buffer:
+            pickle.dump(
+                train_collector.buffer,
+                open(os.path.join(log_path, 'train_buffer.pkl'), "wb")
+            )
 
     if args.resume:
         # load from existing checkpoint
-        resume_name = f"{args.task[:-3].lower()}_{args.seed}_{args.resume_path}"
-        resume_path =  os.path.join(args.logdir, "newrainbow", args.task, resume_name)
+        resume_path =  args.resume_path
         print(f"Loading agent under {resume_path}")
         ckpt_path = os.path.join(resume_path, 'checkpoint.pth')
         if os.path.exists(ckpt_path):

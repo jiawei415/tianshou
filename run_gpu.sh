@@ -9,6 +9,7 @@ num_atoms=51
 v_max=100
 prior_std=1
 noise_dim=2
+noisy_std=0
 ensemble_num=0
 use_dueling=True
 sample_per_step=False
@@ -44,6 +45,6 @@ do
 done
 
 # ps -ef | grep ${task} | awk '{print $2}'| xargs kill -9
-# ps -ef | grep tianshou | awk '{print $2}'| xargs kill -9
+# ps -ef | grep rainbow | awk '{print $2}'| xargs kill -9
 
 # MountainCar-v0, Acrobot-v1, DeepSea-v0

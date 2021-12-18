@@ -862,7 +862,7 @@ class EnsembleLinear(nn.Module):
             if prior_x is not None and self.prior_std > 0:
                 prior_out = [self.priormodel[k](x) for k in active_head]
                 prior_out = torch.stack(prior_out, dim=1)
-                out += prior_out * self.prior_std
+                out += prior_out * self.prior_scale
         else:
             out = self.basedmodel[active_head](x)
             if prior_x is not None and self.prior_std > 0:

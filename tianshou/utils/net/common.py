@@ -97,36 +97,6 @@ class MLP(nn.Module):
         return self.model(s.flatten(1))  # type: ignore
 
 
-class HyperMLP(nn.Module):
-    def __init__(
-        self,
-        input_dim: int,
-        output_dim: int = 0,
-        device: Optional[Union[str, int, torch.device]] = None,
-        linear_layer: Type[nn.Linear] = nn.Linear,
-    ) -> None:
-        super().__init__()
-        self.device = device
-        self.output_dim = output_dim
-        self.model = linear_layer(input_dim, output_dim)
-
-    def forward(self, s: Union[np.ndarray, torch.Tensor], prior_s=None) -> torch.Tensor:
-        if self.device is not None:
-            s = torch.as_tensor(s, device=self.device, dtype=torch.float32).flatten(1)
-            if prior_s is not None:
-                prior_s = torch.as_tensor(prior_s, device=self.device, dtype=torch.float32).flatten(1)
-        return self.model(s, prior_s)  # type: ignore
-
-    def regularization(self, s: Union[np.ndarray, torch.Tensor]) -> torch.Tensor:
-        if self.device is not None:
-            s = torch.as_tensor(
-                s,
-                device=self.device,  # type: ignore
-                dtype=torch.float32,
-            )
-        return self.model.regularization(s.flatten(1))
-
-
 class LastMLP(nn.Module):
     def __init__(
         self,
@@ -354,6 +324,226 @@ class NewNet(nn.Module):
             else:
                 q = q.view(bsz, -1, self.action_num).squeeze(dim=1)
             logits = q
+        if self.softmax:
+            logits = torch.softmax(logits, dim=-1)
+        return logits, state
+
+
+class BaseNet(nn.Module):
+    def __init__(
+        self,
+        state_shape: Union[int, Sequence[int]],
+        action_shape: Union[int, Sequence[int]] = 0,
+        hidden_sizes: Sequence[int] = (),
+        norm_layer: Optional[ModuleType] = None,
+        activation: Optional[ModuleType] = nn.ReLU,
+        device: Union[str, int, torch.device] = "cpu",
+        softmax: bool = False,
+        num_atoms: int = 1,
+        prior_std: float = 0.,
+        use_dueling: bool = False,
+        use_ensemble: bool = False,
+        last_layer: Optional[Tuple[Dict[str, Any], Dict[str, Any]]] = None,
+    ) -> None:
+        super().__init__()
+        self.device = device
+        self.softmax = softmax
+        self.num_atoms = num_atoms
+        self.prior_std = prior_std
+        self.action_num = int(np.prod(action_shape))
+        input_dim = int(np.prod(state_shape))
+        action_dim = int(np.prod(action_shape)) * num_atoms
+        self.use_dueling = use_dueling
+        self.use_ensemble = use_ensemble
+        self.basedmodel = MLP(
+            input_dim, 0, hidden_sizes, norm_layer, activation, device
+        )
+        if self.prior_std:
+            self.priormodel = MLP(
+                input_dim, 0, hidden_sizes, norm_layer, activation, device
+            )
+            for param in self.priormodel.parameters():
+                param.requires_grad = False
+        q_kwargs = last_layer[0]  # type: ignore
+        q_output_dim = action_dim
+        q_kwargs: Dict[str, Any] = {
+            **q_kwargs, "input_dim": self.basedmodel.output_dim,
+            "output_dim": q_output_dim,
+            "device": self.device,
+            "ensemble": self.use_ensemble
+        }
+        self.Q = LastMLP(**q_kwargs)
+        self.output_dim = self.Q.output_dim
+        if self.use_dueling:  # dueling DQN
+            assert len(last_layer) > 1
+            v_kwargs = last_layer[1]  # type: ignore
+            v_output_dim = num_atoms
+            v_kwargs: Dict[str, Any] = {
+                **v_kwargs, "input_dim": self.basedmodel.output_dim,
+                "output_dim": v_output_dim,
+                "device": self.device,
+                "ensemble": self.use_ensemble
+            }
+            self.V = LastMLP(**v_kwargs)
+
+
+class HyperNet(BaseNet):
+    def __init__(
+        self,
+        state_shape: Union[int, Sequence[int]],
+        action_shape: Union[int, Sequence[int]] = 0,
+        hidden_sizes: Sequence[int] = (),
+        norm_layer: Optional[ModuleType] = None,
+        activation: Optional[ModuleType] = nn.ReLU,
+        device: Union[str, int, torch.device] = "cpu",
+        softmax: bool = False,
+        num_atoms: int = 1,
+        prior_std: float = 0,
+        use_dueling: bool = False,
+        use_ensemble: bool = False,
+        last_layer: Optional[Tuple[Dict[str, Any], Dict[str, Any]]] = None
+    ) -> None:
+        super().__init__(
+            state_shape, action_shape, hidden_sizes, norm_layer, activation, device,
+            softmax, num_atoms, prior_std, use_dueling, use_ensemble, last_layer
+        )
+        if self.use_dueling:
+            self.forward = getattr(self, '_dueling_forward')
+        else:
+            self.forward = getattr(self, '_forward')
+
+    def _forward(
+        self,
+        s: Union[np.ndarray, torch.Tensor],
+        state: Any = None,
+        noise: Dict[str, Any] = {},
+        info: Dict[str, Any] = {},
+    ) -> Tuple[torch.Tensor, Any]:
+        """Mapping: s -> flatten (inside MLP)-> logits."""
+        logits = self.basedmodel(s)
+        prior_logits = self.priormodel(s) if self.prior_std else None
+        bsz = logits.shape[0]
+        q = self.Q(logits, prior_logits, noise=noise['Q'])
+        if self.num_atoms > 1:
+            q = q.view(bsz, -1, self.action_num, self.num_atoms).squeeze(dim=1)
+        else:
+            q = q.view(bsz, -1, self.action_num).squeeze(dim=1)
+        logits = q
+        if self.softmax:
+            logits = torch.softmax(logits, dim=-1)
+        return logits, state
+
+    def _dueling_forward(
+        self,
+        s: Union[np.ndarray, torch.Tensor],
+        state: Any = None,
+        noise: Dict[str, Any] = {},
+        info: Dict[str, Any] = {},
+    ) -> Tuple[torch.Tensor, Any]:
+        """Mapping: s -> flatten (inside MLP)-> logits."""
+        logits = self.basedmodel(s)
+        prior_logits = self.priormodel(s) if self.prior_std else None
+        bsz = logits.shape[0]
+        q, v = self.Q(logits, prior_logits, noise=noise['Q']), self.V(logits, prior_logits, noise=noise['V'])
+        if self.num_atoms > 1:
+            q = q.view(bsz, -1, self.action_num, self.num_atoms).squeeze(dim=1)
+            v = v.view(bsz, -1, 1, self.num_atoms).squeeze(dim=1)
+        else:
+            q = q.view(bsz, -1, self.action_num).squeeze(dim=1)
+            v = v.view(bsz, -1, 1).squeeze(dim=1)
+        logits = q - q.mean(dim=1, keepdim=True) + v
+        if self.softmax:
+            logits = torch.softmax(logits, dim=-1)
+        return logits, state
+
+
+class NoisyNet(HyperNet):
+    def __init__(
+        self,
+        state_shape: Union[int, Sequence[int]],
+        action_shape: Union[int, Sequence[int]] = 0,
+        hidden_sizes: Sequence[int] = (),
+        norm_layer: Optional[ModuleType] = None,
+        activation: Optional[ModuleType] = nn.ReLU,
+        device: Union[str, int, torch.device] = "cpu",
+        softmax: bool = False,
+        num_atoms: int = 1,
+        prior_std: float = 0,
+        use_dueling: bool = False,
+        use_ensemble: bool = False,
+        last_layer: Optional[Tuple[Dict[str, Any], Dict[str, Any]]] = None
+    ) -> None:
+        super().__init__(
+            state_shape,action_shape, hidden_sizes, norm_layer, activation, device,
+            softmax, num_atoms, prior_std, use_dueling, use_ensemble, last_layer
+        )
+
+
+class EnsembleNet(BaseNet):
+    def __init__(
+        self,
+        state_shape: Union[int, Sequence[int]],
+        action_shape: Union[int, Sequence[int]] = 0,
+        hidden_sizes: Sequence[int] = (),
+        norm_layer: Optional[ModuleType] = None,
+        activation: Optional[ModuleType] = nn.ReLU,
+        device: Union[str, int, torch.device] = "cpu",
+        softmax: bool = False,
+        num_atoms: int = 1,
+        prior_std: float = 0,
+        use_dueling: bool = False,
+        use_ensemble: bool = False,
+        last_layer: Optional[Tuple[Dict[str, Any], Dict[str, Any]]] = None
+    ) -> None:
+        super().__init__(
+            state_shape,action_shape, hidden_sizes, norm_layer, activation, device,
+            softmax, num_atoms, prior_std, use_dueling, use_ensemble, last_layer
+        )
+        if self.use_dueling:
+            self.forward = getattr(self, '_dueling_forward')
+        else:
+            self.forward = getattr(self, '_forward')
+
+    def _forward(
+        self,
+        s: Union[np.ndarray, torch.Tensor],
+        state: Any = None,
+        active_head: Any = None,
+        info: Dict[str, Any] = {},
+    ) -> Tuple[torch.Tensor, Any]:
+        """Mapping: s -> flatten (inside MLP)-> logits."""
+        logits = self.basedmodel(s)
+        prior_logits = self.priormodel(s) if self.prior_std else None
+        bsz = logits.shape[0]
+        q = self.Q(logits, prior_logits, active_head=active_head)
+        if self.num_atoms > 1:
+            q = q.view(bsz, -1, self.action_num, self.num_atoms).squeeze(dim=1)
+        else:
+            q = q.view(bsz, -1, self.action_num).squeeze(dim=1)
+        logits = q
+        if self.softmax:
+            logits = torch.softmax(logits, dim=-1)
+        return logits, state
+
+    def _dueling_forward(
+        self,
+        s: Union[np.ndarray, torch.Tensor],
+        state: Any = None,
+        active_head: Any = None,
+        info: Dict[str, Any] = {},
+    ) -> Tuple[torch.Tensor, Any]:
+        """Mapping: s -> flatten (inside MLP)-> logits."""
+        logits = self.basedmodel(s)
+        prior_logits = self.priormodel(s) if self.prior_std else None
+        bsz = logits.shape[0]
+        q, v = self.Q(logits, prior_logits, active_head=active_head), self.V(logits, prior_logits, active_head=active_head)
+        if self.num_atoms > 1:
+            q = q.view(bsz, -1, self.action_num, self.num_atoms).squeeze(dim=1)
+            v = v.view(bsz, -1, 1, self.num_atoms).squeeze(dim=1)
+        else:
+            q = q.view(bsz, -1, self.action_num).squeeze(dim=1)
+            v = v.view(bsz, -1, 1).squeeze(dim=1)
+        logits = q - q.mean(dim=1, keepdim=True) + v
         if self.softmax:
             logits = torch.softmax(logits, dim=-1)
         return logits, state

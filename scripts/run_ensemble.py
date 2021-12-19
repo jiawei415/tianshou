@@ -16,7 +16,7 @@ from tianshou.env import DummyVectorEnv
 from tianshou.policy import EnsembleDQNPolicy, EnsembleC51Policy
 from tianshou.trainer import offpolicy_trainer
 from tianshou.utils import TensorboardLogger, import_module_or_data, read_config_dict
-from tianshou.utils.net.common import NewNet
+from tianshou.utils.net.common import EnsembleNet
 from tianshou.utils.net.discrete import EnsembleLinear
 
 
@@ -172,7 +172,7 @@ def main(args=get_args()):
         model_params['last_layer'] = ({ "linear_layer": linear_layer}, {"linear_layer": linear_layer})
     else:
         model_params['last_layer'] = ({ "linear_layer": linear_layer}, )
-    model = NewNet(**model_params).to(args.device)
+    model = EnsembleNet(**model_params).to(args.device)
 
     if args.init_type == "trunc_normal":
         model.apply(trunc_normal_init)

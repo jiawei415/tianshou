@@ -16,7 +16,7 @@ from tianshou.env import DummyVectorEnv
 from tianshou.policy import NoisyDQNPolicy, NoisyC51Policy
 from tianshou.trainer import offpolicy_trainer
 from tianshou.utils import TensorboardLogger, import_module_or_data, read_config_dict
-from tianshou.utils.net.common import NewNet
+from tianshou.utils.net.common import NoisyNet
 from tianshou.utils.net.discrete import NewNoisyLinear
 
 
@@ -98,7 +98,7 @@ def get_args():
     parser.add_argument('--eps-test', type=float, default=0.)
     parser.add_argument('--eps-train', type=float, default=0.)
     parser.add_argument('--sample-per-step', action="store_true", default=False)
-    parser.add_argument('--action-sample-num', type=int, default=4)
+    parser.add_argument('--action-sample-num', type=int, default=1)
     parser.add_argument('--action-select-scheme', type=str, default=None, help='MAX, VIDS')
     parser.add_argument('--value-gap-eps', type=float, default=1e-3)
     parser.add_argument('--value-var-eps', type=float, default=1e-3)
@@ -164,14 +164,13 @@ def main(args=get_args()):
         "softmax": True,
         "num_atoms": args.num_atoms,
         "prior_std": args.prior_std,
-        "use_ensemble": False,
         "use_dueling": args.use_dueling,
     }
     if args.use_dueling:
         model_params['last_layer'] = ({ "linear_layer": linear_layer}, {"linear_layer": linear_layer})
     else:
         model_params['last_layer'] = ({ "linear_layer": linear_layer}, )
-    model = NewNet(**model_params).to(args.device)
+    model = NoisyNet(**model_params).to(args.device)
 
     if args.init_type == "trunc_normal":
         model.apply(trunc_normal_init)

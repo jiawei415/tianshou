@@ -16,7 +16,7 @@ from tianshou.env import DummyVectorEnv
 from tianshou.policy import  HyperDQNPolicy, HyperC51Policy
 from tianshou.trainer import offpolicy_trainer
 from tianshou.utils import TensorboardLogger, import_module_or_data, read_config_dict
-from tianshou.utils.net.common import NewNet
+from tianshou.utils.net.common import HyperNet
 from tianshou.utils.net.discrete import NewHyperLinear
 
 
@@ -168,14 +168,13 @@ def main(args=get_args()):
         "softmax": True,
         "num_atoms": args.num_atoms,
         "prior_std": args.prior_std,
-        "use_ensemble": False,
         "use_dueling": args.use_dueling,
     }
     if args.use_dueling:
         model_params['last_layer'] = ({ "linear_layer": linear_layer}, {"linear_layer": linear_layer})
     else:
         model_params['last_layer'] = ({ "linear_layer": linear_layer}, )
-    model = NewNet(**model_params).to(args.device)
+    model = HyperNet(**model_params).to(args.device)
 
     if args.init_type == "trunc_normal":
         model.apply(trunc_normal_init)

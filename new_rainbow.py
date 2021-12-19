@@ -7,7 +7,6 @@ import pickle
 import pprint
 import gym
 import numpy as np
-from numpy.core.numeric import array_equal
 import torch
 import torch.nn as nn
 from torch.utils.tensorboard import SummaryWriter
@@ -82,9 +81,7 @@ def get_args():
     parser.add_argument('--target-update-freq', type=int, default=100)
     parser.add_argument('--batch-size', type=int, default=128)
     parser.add_argument('--lr', type=float, default=0.0001)
-    parser.add_argument('--hyper-reg-coef', type=float, default=0.01)
-    parser.add_argument('--hyper-weight-decay', type=float, default=0.0003125)
-    parser.add_argument('--based-weight-decay', type=float, default=0.0003125)
+    parser.add_argument('--weight-decay', type=float, default=0.0003125)
     parser.add_argument('--n-step', type=int, default=3)
     parser.add_argument('--gamma', type=float, default=0.99)
     parser.add_argument('--v-max', type=float, default=100.)
@@ -97,6 +94,8 @@ def get_args():
     parser.add_argument('--prior-scale', type=float, default=10.)
     parser.add_argument('--noise-std', type=float, default=1.)
     parser.add_argument('--target-noise-std', type=float, default=0.)
+    parser.add_argument('--hyper-reg-coef', type=float, default=0.01)
+    parser.add_argument('--hyper-weight-decay', type=float, default=0.0003125)
     # network config
     parser.add_argument('--hidden-sizes', type=int, nargs='*', default=[64, 64])
     parser.add_argument('--ensemble-sizes', type=int, nargs='*', default=[])
@@ -218,7 +217,7 @@ def main(args=get_args()):
     if args.hyper_reg_coef:
         args.hyper_weight_decay = 0
     trainable_params = [
-            {'params': (p for name, p in model.named_parameters() if 'priormodel' not in name and 'hypermodel' not in name), 'weight_decay': args.based_weight_decay},
+            {'params': (p for name, p in model.named_parameters() if 'priormodel' not in name and 'hypermodel' not in name), 'weight_decay': args.weight_decay},
             {'params': (p for name, p in model.named_parameters() if 'priormodel' not in name and 'hypermodel' in name), 'weight_decay': args.hyper_weight_decay},
         ]
     optim = torch.optim.Adam(trainable_params, lr=args.lr)

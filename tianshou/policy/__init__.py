@@ -5,8 +5,8 @@ from tianshou.policy.base import BasePolicy
 from tianshou.policy.random import RandomPolicy
 from tianshou.policy.modelfree.dqn import DQNPolicy, NewDQNPolicy
 from tianshou.policy.modelfree.bdqn import BootstrappedDQNPolicy
-from tianshou.policy.modelfree.c51 import C51Policy, HyperC51Policy
-from tianshou.policy.modelfree.rainbow import RainbowPolicy, HyperRainbowPolicy, NewRainbowPolicy
+from tianshou.policy.modelfree.c51 import C51Policy
+from tianshou.policy.modelfree.rainbow import RainbowPolicy, NewRainbowPolicy
 from tianshou.policy.modelfree.qrdqn import QRDQNPolicy
 from tianshou.policy.modelfree.iqn import IQNPolicy
 from tianshou.policy.modelfree.fqf import FQFPolicy
@@ -25,6 +25,9 @@ from tianshou.policy.imitation.discrete_cql import DiscreteCQLPolicy
 from tianshou.policy.imitation.discrete_crr import DiscreteCRRPolicy
 from tianshou.policy.modelbased.psrl import PSRLPolicy
 from tianshou.policy.multiagent.mapolicy import MultiAgentPolicyManager
+from tianshou.policy.modelfree.hyper import HyperDQNPolicy, HyperC51Policy
+from tianshou.policy.modelfree.noisy import NoisyDQNPolicy, NoisyC51Policy
+from tianshou.policy.modelfree.ensemble import EnsembleDQNPolicy, EnsembleC51Policy
 
 __all__ = [
     "BasePolicy",
@@ -33,9 +36,7 @@ __all__ = [
     "NewDQNPolicy",
     "BootstrappedDQNPolicy",
     "C51Policy",
-    "HyperC51Policy",
     "RainbowPolicy",
-    "HyperRainbowPolicy",
     "NewRainbowPolicy",
     "QRDQNPolicy",
     "IQNPolicy",
@@ -55,4 +56,10 @@ __all__ = [
     "DiscreteCRRPolicy",
     "PSRLPolicy",
     "MultiAgentPolicyManager",
+    "HyperDQNPolicy",
+    "HyperC51Policy",
+    "NoisyDQNPolicy",
+    "NoisyC51Policy",
+    "EnsembleDQNPolicy",
+    "EnsembleC51Policy",
 ]

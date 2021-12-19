@@ -424,10 +424,7 @@ class HyperNet(BaseNet):
         prior_logits = self.priormodel(s) if self.prior_std else None
         bsz = logits.shape[0]
         q = self.Q(logits, prior_logits, noise=noise['Q'])
-        if self.num_atoms > 1:
-            q = q.view(bsz, -1, self.action_num, self.num_atoms).squeeze(dim=1)
-        else:
-            q = q.view(bsz, -1, self.action_num).squeeze(dim=1)
+        q = q.view(bsz, self.action_num, self.num_atoms).squeeze(dim=-1)
         logits = q
         if self.softmax:
             logits = torch.softmax(logits, dim=-1)
@@ -445,12 +442,8 @@ class HyperNet(BaseNet):
         prior_logits = self.priormodel(s) if self.prior_std else None
         bsz = logits.shape[0]
         q, v = self.Q(logits, prior_logits, noise=noise['Q']), self.V(logits, prior_logits, noise=noise['V'])
-        if self.num_atoms > 1:
-            q = q.view(bsz, -1, self.action_num, self.num_atoms).squeeze(dim=1)
-            v = v.view(bsz, -1, 1, self.num_atoms).squeeze(dim=1)
-        else:
-            q = q.view(bsz, -1, self.action_num).squeeze(dim=1)
-            v = v.view(bsz, -1, 1).squeeze(dim=1)
+        q = q.view(bsz, self.action_num, self.num_atoms).squeeze(dim=-1)
+        v = v.view(bsz, 1, self.num_atoms).squeeze(dim=-1)
         logits = q - q.mean(dim=1, keepdim=True) + v
         if self.softmax:
             logits = torch.softmax(logits, dim=-1)
@@ -516,10 +509,7 @@ class EnsembleNet(BaseNet):
         prior_logits = self.priormodel(s) if self.prior_std else None
         bsz = logits.shape[0]
         q = self.Q(logits, prior_logits, active_head=active_head)
-        if self.num_atoms > 1:
-            q = q.view(bsz, -1, self.action_num, self.num_atoms).squeeze(dim=1)
-        else:
-            q = q.view(bsz, -1, self.action_num).squeeze(dim=1)
+        q = q.view(bsz, -1, self.action_num, self.num_atoms).squeeze(dim=-1).squeeze(dim=1)
         logits = q
         if self.softmax:
             logits = torch.softmax(logits, dim=-1)
@@ -537,12 +527,8 @@ class EnsembleNet(BaseNet):
         prior_logits = self.priormodel(s) if self.prior_std else None
         bsz = logits.shape[0]
         q, v = self.Q(logits, prior_logits, active_head=active_head), self.V(logits, prior_logits, active_head=active_head)
-        if self.num_atoms > 1:
-            q = q.view(bsz, -1, self.action_num, self.num_atoms).squeeze(dim=1)
-            v = v.view(bsz, -1, 1, self.num_atoms).squeeze(dim=1)
-        else:
-            q = q.view(bsz, -1, self.action_num).squeeze(dim=1)
-            v = v.view(bsz, -1, 1).squeeze(dim=1)
+        q = q.view(bsz, -1, self.action_num, self.num_atoms).squeeze(dim=-1).squeeze(dim=1)
+        v = v.view(bsz, -1, 1, self.num_atoms).squeeze(dim=-1).squeeze(dim=1)
         logits = q - q.mean(dim=1, keepdim=True) + v
         if self.softmax:
             logits = torch.softmax(logits, dim=-1)

@@ -61,6 +61,7 @@ class HyperDQNPolicy(DQNPolicy):
         self.noise_update = None
         self.sample_noise = sample_dueling_noise if use_dueling else sample_noise
         if self.action_select_scheme is None:
+            assert self.action_sample_num == 1
             self.get_actions = getattr(self, '_greedy_action_select')
         elif self.action_select_scheme == 'MAX':
             self.get_actions = getattr(self, '_max_action_select')
@@ -220,6 +221,7 @@ class HyperC51Policy(C51Policy):
         self.noise_update = None
         self.sample_noise = sample_dueling_noise if use_dueling else sample_noise
         if self.action_select_scheme is None:
+            assert self.action_sample_num == 1
             self.get_actions = getattr(self, '_greedy_action_select')
         elif self.action_select_scheme == 'MAX':
             self.get_actions = getattr(self, '_max_action_select')

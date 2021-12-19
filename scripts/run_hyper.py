@@ -109,7 +109,7 @@ def get_args():
     # other confing
     parser.add_argument('--save-interval', type=int, default=4)
     parser.add_argument('--save-buffer', action="store_true", default=False)
-    parser.add_argument('--logdir', type=str, default='~/results/tianshou')
+    parser.add_argument('--logdir', type=str, default='./results')
     parser.add_argument('--render', type=float, default=0.)
     parser.add_argument('--resume', action="store_true", default=False)
     parser.add_argument('--resume-path', type=str, default='')

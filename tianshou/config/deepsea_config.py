@@ -1,7 +1,6 @@
 alg_config = dict(
     target_update_freq=4,
     hyper_reg_coef=0.,
-    based_weight_decay=0.,
     hyper_weight_decay=0.,
     prior_scale=10.,
     hidden_sizes=[64,64],

@@ -49,15 +49,14 @@ class NoisyDQNPolicy(DQNPolicy):
         self.noise_test = None
         self.noise_train = None
         self.noise_update = None
-        if self.action_sample_num == 1:
+        if self.action_select_scheme is None:
             self.get_actions = getattr(self, '_greedy_action_select')
+        elif self.action_select_scheme == 'MAX':
+            self.get_actions = getattr(self, '_max_action_select')
+        elif self.action_select_scheme == 'VIDS':
+            self.get_actions = getattr(self, '_vids_action_select')
         else:
-            if self.action_select_scheme == 'VIDS':
-                self.get_actions = getattr(self, '_vids_action_select')
-            elif self.action_select_scheme == 'MAX':
-                self.get_actions = getattr(self, '_max_action_select')
-            else:
-                raise NotImplementedError(f'No action selcet scheme {self.action_select_scheme}')
+            raise NotImplementedError(f'No action selcet scheme {self.action_select_scheme}')
 
     def _vids_action_select(self, q):
         value_gap = q.max(dim=-1, keepdim=True)[0] - q
@@ -196,15 +195,14 @@ class NoisyC51Policy(C51Policy):
         self.noise_test = None
         self.noise_train = None
         self.noise_update = None
-        if self.action_sample_num == 1:
+        if self.action_select_scheme is None:
             self.get_actions = getattr(self, '_greedy_action_select')
+        elif self.action_select_scheme == 'MAX':
+            self.get_actions = getattr(self, '_max_action_select')
+        elif self.action_select_scheme == 'VIDS':
+            self.get_actions = getattr(self, '_vids_action_select')
         else:
-            if self.action_select_scheme == 'VIDS':
-                self.get_actions = getattr(self, '_vids_action_select')
-            elif self.action_select_scheme == 'MAX':
-                self.get_actions = getattr(self, '_max_action_select')
-            else:
-                raise NotImplementedError(f'No action selcet scheme {self.action_select_scheme}')
+            raise NotImplementedError(f'No action selcet scheme {self.action_select_scheme}')
 
     def _vids_action_select(self, logits, q):
         value_gap = q.max(dim=-1, keepdim=True)[0] - q

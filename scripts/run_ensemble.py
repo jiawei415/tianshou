@@ -114,7 +114,7 @@ def get_args():
     parser.add_argument('--policy-path', type=str, default='')
     parser.add_argument('--device', type=str, default='cuda' if torch.cuda.is_available() else 'cpu')
     # overwrite config
-    parser.add_argument('--config', type=str, default="{'device':'cpu', 'num_atoms':1}",
+    parser.add_argument('--config', type=str, default="{}",
                         help="game config eg., {'seed':2021,'size':20,'hidden_sizes':[128,128],'ensemble_num':4,'prior_std':2,'num_atoms':1}")
     args = parser.parse_known_args()[0]
     return args
@@ -240,13 +240,7 @@ def main(args=get_args()):
         buf = VectorReplayBuffer(args.buffer_size, buffer_num=len(train_envs))
 
     # collector
-    train_collector = Collector(
-        policy,
-        train_envs,
-        buf,
-        exploration_noise=False,
-        ensemble_num=args.ensemble_num
-    )
+    train_collector = Collector(policy, train_envs, buf, exploration_noise=False, ensemble_num=args.ensemble_num)
     test_collector = Collector(policy, test_envs, exploration_noise=False)
     train_collector.collect(n_step=args.min_buffer_size, random=True)
 

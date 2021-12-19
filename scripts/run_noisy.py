@@ -55,7 +55,7 @@ def make_env(env_name, max_step=None, size=10, seed=2021):
 def get_args():
     parser = argparse.ArgumentParser()
     # environment config
-    parser.add_argument('--task', type=str, default='DeepSea-v0')
+    parser.add_argument('--task', type=str, default='MountainCar-v0')
     parser.add_argument('--max-step', type=int, default=500)
     parser.add_argument('--size', type=int, default=20)
     parser.add_argument('--seed', type=int, default=2021)
@@ -98,8 +98,8 @@ def get_args():
     parser.add_argument('--eps-test', type=float, default=0.)
     parser.add_argument('--eps-train', type=float, default=0.)
     parser.add_argument('--sample-per-step', action="store_true", default=False)
-    parser.add_argument('--action-sample-num', type=int, default=1)
-    parser.add_argument('--action-select-scheme', type=str, default='MAX', help='MAX, VIDS')
+    parser.add_argument('--action-sample-num', type=int, default=4)
+    parser.add_argument('--action-select-scheme', type=str, default=None, help='MAX, VIDS')
     parser.add_argument('--value-gap-eps', type=float, default=1e-3)
     parser.add_argument('--value-var-eps', type=float, default=1e-3)
     # other confing
@@ -238,8 +238,7 @@ def main(args=get_args()):
         buf = VectorReplayBuffer(args.buffer_size, buffer_num=len(train_envs))
 
     # collector
-    train_collector = Collector(policy, train_envs, buf, exploration_noise=False,
-    )
+    train_collector = Collector(policy, train_envs, buf, exploration_noise=False)
     test_collector = Collector(policy, test_envs, exploration_noise=False)
     train_collector.collect(n_step=args.min_buffer_size, random=True)
 

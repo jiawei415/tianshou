@@ -36,8 +36,8 @@ class NoisyDQNPolicy(DQNPolicy):
             model, optim, discount_factor, estimation_step, target_update_freq, reward_normalization, **kwargs
         )
         self.last_layer_inp_dim = model.basedmodel.output_dim
-        self.v_out_dim = model.V.output_dim if use_dueling else 0
-        self.q_out_dim = model.Q.output_dim
+        self.v_out_dim = model.v_output_dim if use_dueling else 0
+        self.q_out_dim = model.q_output_dim
         self.use_dueling = use_dueling
         self.same_noise_update = same_noise_update
         self.batch_noise_update = batch_noise_update
@@ -84,8 +84,9 @@ class NoisyDQNPolicy(DQNPolicy):
         else:
             main_model_noise = self.sample_noise(batch_size)
             target_model_noise = self.sample_noise(batch_size)
-        a = self(batch, model="model", input="obs_next", noise=main_model_noise).act # (None,)
-        target_q = self(batch, model="model_old", input="obs_next", noise=target_model_noise).logits # (None, action_num)
+        with torch.no_grad():
+            a = self(batch, model="model", input="obs_next", noise=main_model_noise).act # (None,)
+            target_q = self(batch, model="model_old", input="obs_next", noise=target_model_noise).logits # (None, action_num)
         target_q = target_q[np.arange(len(a)), a]
         return target_q
 
@@ -183,8 +184,8 @@ class NoisyC51Policy(C51Policy):
             estimation_step, target_update_freq, reward_normalization, **kwargs
         )
         self.last_layer_inp_dim = model.basedmodel.output_dim
-        self.v_out_dim = model.V.output_dim if use_dueling else 0
-        self.q_out_dim = model.Q.output_dim
+        self.v_out_dim = model.v_output_dim if use_dueling else 0
+        self.q_out_dim = model.q_output_dim
         self.use_dueling = use_dueling
         self.same_noise_update = same_noise_update
         self.batch_noise_update = batch_noise_update
@@ -231,8 +232,9 @@ class NoisyC51Policy(C51Policy):
         else:
             main_model_noise = self.sample_noise(batch_size)
             target_model_noise = self.sample_noise(batch_size)
-        a = self(batch, model="model", input="obs_next", noise=main_model_noise).act # (None,)
-        next_dist = self(batch, model="model_old", input="obs_next", noise=target_model_noise).logits # (None, action_num)
+        with torch.no_grad():
+            a = self(batch, model="model", input="obs_next", noise=main_model_noise).act # (None,)
+            next_dist = self(batch, model="model_old", input="obs_next", noise=target_model_noise).logits # (None, action_num)
         next_dist = next_dist[np.arange(len(a)), a, :] # (None, num_atoms)
         support = self.support.view(1, -1, 1) # (1, num_atoms, 1)
         target_support = batch.returns.clamp(self._v_min, self._v_max).unsqueeze(-2) # (None, 1, num_atoms)

@@ -95,8 +95,9 @@ class HyperDQNPolicy(DQNPolicy):
         else:
             main_model_noise = self.sample_noise(batch_size, self.noise_dim, self.noise_std)
             target_model_noise = self.sample_noise(batch_size, self.noise_dim, self.noise_std)
-        a = self(batch, model="model", input="obs_next", noise=main_model_noise).act # (None,)
-        target_q = self(batch, model="model_old", input="obs_next", noise=target_model_noise).logits # (None, action_num)
+        with torch.no_grad():
+            a = self(batch, model="model", input="obs_next", noise=main_model_noise).act # (None,)
+            target_q = self(batch, model="model_old", input="obs_next", noise=target_model_noise).logits # (None, action_num)
         target_q = target_q[np.arange(len(a)), a]
         return target_q
 
@@ -255,8 +256,9 @@ class HyperC51Policy(C51Policy):
         else:
             main_model_noise = self.sample_noise(batch_size, self.noise_dim, self.noise_std)
             target_model_noise = self.sample_noise(batch_size, self.noise_dim, self.noise_std)
-        a = self(batch, model="model", input="obs_next", noise=main_model_noise).act # (None,)
-        next_dist = self(batch, model="model_old", input="obs_next", noise=target_model_noise).logits # (None, action_num)
+        with torch.no_grad():
+            a = self(batch, model="model", input="obs_next", noise=main_model_noise).act # (None,)
+            next_dist = self(batch, model="model_old", input="obs_next", noise=target_model_noise).logits # (None, action_num)
         next_dist = next_dist[np.arange(len(a)), a, :] # (None, num_atoms)
         support = self.support.view(1, -1, 1) # (1, num_atoms, 1)
         target_support = batch.returns.clamp(self._v_min, self._v_max).unsqueeze(-2) # (None, 1, num_atoms)

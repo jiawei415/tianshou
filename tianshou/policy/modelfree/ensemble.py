@@ -2,7 +2,6 @@ import torch
 import torch.nn.functional as F
 import numpy as np
 from typing import Any, Dict, Optional, Union, Callable
-from tianshou.data.utils.converter import to_torch
 
 from tianshou.policy import BasePolicy, C51Policy, DQNPolicy
 from tianshou.policy.base import _nstep_return

@@ -71,7 +71,7 @@ def get_args():
     parser.add_argument('--n-step', type=int, default=3)
     parser.add_argument('--gamma', type=float, default=0.99)
     parser.add_argument('--v-max', type=float, default=100.)
-    parser.add_argument('--num-atoms', type=int, default=1)
+    parser.add_argument('--num-atoms', type=int, default=51)
     # algorithm config
     parser.add_argument('--alg-type', type=str, default="ensemble")
     parser.add_argument('--ensemble-num', type=int, default=4, help="Greater than 0 means using EnsembelNet")
@@ -182,6 +182,7 @@ def main(args=get_args()):
 
     # init_model(model)
     print(f"Network structure:\n{str(model)}")
+    print(f"Network parameters: {sum(param.numel() for param in model.parameters())}")
 
     # optimizer
     optim = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)

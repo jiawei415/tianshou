@@ -164,9 +164,9 @@ class HyperDQNPolicy(DQNPolicy):
         weight = batch.pop("weight", 1.0)
         loss = (td * weight).mean(0).sum()
         if self.hyper_reg_coef:
-            reg_loss = self.model.Q.model.regularization(self.noise_update['Q'])
+            reg_loss = self.model.Q.regularization(self.noise_update['Q'])
             if self.use_dueling:
-                reg_loss += self.model.V.model.regularization(self.noise_update['V'])
+                reg_loss += self.model.V.regularization(self.noise_update['V'])
             loss += reg_loss * (self.hyper_reg_coef / kwargs['sample_num'])
         batch.weight = td  # prio-buffer
         self.optim.zero_grad()
@@ -321,9 +321,9 @@ class HyperC51Policy(C51Policy):
         weight = batch.pop("weight", 1.0)
         loss = (cross_entropy * weight).mean(0).sum()
         if self.hyper_reg_coef:
-            reg_loss = self.model.Q.model.regularization(self.noise_update['Q'])
+            reg_loss = self.model.Q.regularization(self.noise_update['Q'])
             if self.use_dueling:
-                reg_loss += self.model.V.model.regularization(self.noise_update['V'])
+                reg_loss += self.model.V.regularization(self.noise_update['V'])
             loss += reg_loss * (self.hyper_reg_coef / kwargs['sample_num'])
         batch.weight = cross_entropy.detach()  # prio-buffer
         self.optim.zero_grad()

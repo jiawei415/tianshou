@@ -71,7 +71,7 @@ def get_args():
     parser.add_argument('--n-step', type=int, default=3)
     parser.add_argument('--gamma', type=float, default=0.99)
     parser.add_argument('--v-max', type=float, default=100.)
-    parser.add_argument('--num-atoms', type=int, default=1)
+    parser.add_argument('--num-atoms', type=int, default=51)
     # algorithm config
     parser.add_argument('--alg-type', type=str, default="hyper")
     parser.add_argument('--noise-std', type=float, default=1.)
@@ -185,6 +185,7 @@ def main(args=get_args()):
 
     # init_model(model)
     print(f"Network structure:\n{str(model)}")
+    print(f"Network parameters: {sum(param.numel() for param in model.parameters())}")
 
     # optimizer
     if args.hyper_reg_coef:

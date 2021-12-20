@@ -157,7 +157,7 @@ def main(args=get_args()):
         'prior_scale': args.prior_scale,
         'batch_noise': args.batch_noise_update
     }
-    def linear_layer(x, y):
+    def last_layer(x, y):
         return NewHyperLinear(x, y, **last_layer_params)
 
     model_params = {
@@ -171,9 +171,9 @@ def main(args=get_args()):
         "use_dueling": args.use_dueling,
     }
     if args.use_dueling:
-        model_params['last_layer'] = ({ "linear_layer": linear_layer}, {"linear_layer": linear_layer})
+        model_params['last_layers'] = ({ "last_layer": last_layer}, {"last_layer": last_layer})
     else:
-        model_params['last_layer'] = ({ "linear_layer": linear_layer}, )
+        model_params['last_layers'] = ({ "last_layer": last_layer}, )
     model = HyperNet(**model_params).to(args.device)
 
     if args.init_type == "trunc_normal":

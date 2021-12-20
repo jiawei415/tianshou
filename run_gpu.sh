@@ -18,19 +18,19 @@ sample_per_step=False
 same_noise_update=True
 
 config="{
-    'size':${size}, \
-    'epoch':${epoch}, \
-    'num_atoms':${num_atoms}, \
-    'v_max':${v_max}, \
-    'prior_std':${prior_std}, \
-    'noise_dim':${noise_dim}, \
-    'noisy_std':${noisy_std}, \
-    'ensemble_num':${ensemble_num}, \
-    'use_dueling':${use_dueling}, \
-    'sample_per_step':${sample_per_step}, \
-    'same_noise_update':${same_noise_update}, \
-    'action_sample_num':1, \
-    'action_select_scheme':None, \
+'size':${size}, \
+'epoch':${epoch}, \
+'num_atoms':${num_atoms}, \
+'v_max':${v_max}, \
+'prior_std':${prior_std}, \
+'noise_dim':${noise_dim}, \
+'noisy_std':${noisy_std}, \
+'ensemble_num':${ensemble_num}, \
+'use_dueling':${use_dueling}, \
+'sample_per_step':${sample_per_step}, \
+'same_noise_update':${same_noise_update}, \
+'action_sample_num':1, \
+'action_select_scheme':None,
 }"
 
 time=2
@@ -38,7 +38,7 @@ time=2
 for i in $(seq 5)
 do
     tag=$(date "+%Y%m%d%H%M%S")
-    python -m scripts.run_${alg} --task ${task} --seed ${seed} --action_select_scheme ${action_select_scheme} --config "${config}" # > ~/logs/${task}_${tag}_3.out 2> ~/logs/${task}_${tag}_3.err &
+    python -m scripts.run_${alg} --task ${task} --seed ${seed} --config "${config}" > ~/logs/${task}_${tag}_3.out 2> ~/logs/${task}_${tag}_3.err &
     echo "run $seed $tag"
     let seed=$seed+1
     sleep ${time}

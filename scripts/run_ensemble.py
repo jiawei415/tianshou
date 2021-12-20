@@ -154,7 +154,7 @@ def main(args=get_args()):
         'ensemble_num': args.ensemble_num,
         'ensemble_sizes': args.ensemble_sizes
     }
-    def linear_layer(x, y):
+    def last_layer(x, y):
         return EnsembleLinear(x, y, **last_layer_params)
 
     model_params = {
@@ -165,13 +165,12 @@ def main(args=get_args()):
         "softmax": True,
         "num_atoms": args.num_atoms,
         "prior_std": args.prior_std,
-        "use_ensemble": True,
         "use_dueling": args.use_dueling,
     }
     if args.use_dueling:
-        model_params['last_layer'] = ({ "linear_layer": linear_layer}, {"linear_layer": linear_layer})
+        model_params['last_layers'] = ({ "last_layer": last_layer}, {"last_layer": last_layer})
     else:
-        model_params['last_layer'] = ({ "linear_layer": linear_layer}, )
+        model_params['last_layers'] = ({ "last_layer": last_layer}, )
     model = EnsembleNet(**model_params).to(args.device)
 
     if args.init_type == "trunc_normal":

@@ -342,8 +342,7 @@ class BaseNet(nn.Module):
         num_atoms: int = 1,
         prior_std: float = 0.,
         use_dueling: bool = False,
-        use_ensemble: bool = False,
-        last_layer: Optional[Tuple[Dict[str, Any], Dict[str, Any]]] = None,
+        last_layers: Optional[Tuple[Dict[str, Any], Dict[str, Any]]] = None,
     ) -> None:
         super().__init__()
         self.device = device
@@ -354,7 +353,6 @@ class BaseNet(nn.Module):
         input_dim = int(np.prod(state_shape))
         action_dim = int(np.prod(action_shape)) * num_atoms
         self.use_dueling = use_dueling
-        self.use_ensemble = use_ensemble
         self.basedmodel = MLP(
             input_dim, 0, hidden_sizes, norm_layer, activation, device
         )
@@ -364,27 +362,16 @@ class BaseNet(nn.Module):
             )
             for param in self.priormodel.parameters():
                 param.requires_grad = False
-        q_kwargs = last_layer[0]  # type: ignore
-        q_output_dim = action_dim
-        q_kwargs: Dict[str, Any] = {
-            **q_kwargs, "input_dim": self.basedmodel.output_dim,
-            "output_dim": q_output_dim,
-            "device": self.device,
-            "ensemble": self.use_ensemble
-        }
-        self.Q = LastMLP(**q_kwargs)
-        self.output_dim = self.Q.output_dim
+        q_layer = last_layers[0]['last_layer']
+        self.q_input_dim = self.basedmodel.output_dim
+        self.q_output_dim = action_dim
+        self.Q = q_layer(self.q_input_dim, self.q_output_dim)
         if self.use_dueling:  # dueling DQN
-            assert len(last_layer) > 1
-            v_kwargs = last_layer[1]  # type: ignore
-            v_output_dim = num_atoms
-            v_kwargs: Dict[str, Any] = {
-                **v_kwargs, "input_dim": self.basedmodel.output_dim,
-                "output_dim": v_output_dim,
-                "device": self.device,
-                "ensemble": self.use_ensemble
-            }
-            self.V = LastMLP(**v_kwargs)
+            assert len(last_layers) > 1
+            v_layer = last_layers[1]['last_layer']
+            self.v_input_dim = self.basedmodel.output_dim
+            self.v_output_dim = num_atoms
+            self.V = v_layer(self.v_input_dim, self.v_output_dim)
 
 
 class HyperNet(BaseNet):
@@ -400,12 +387,11 @@ class HyperNet(BaseNet):
         num_atoms: int = 1,
         prior_std: float = 0,
         use_dueling: bool = False,
-        use_ensemble: bool = False,
-        last_layer: Optional[Tuple[Dict[str, Any], Dict[str, Any]]] = None
+        last_layers: Optional[Tuple[Dict[str, Any], Dict[str, Any]]] = None
     ) -> None:
         super().__init__(
             state_shape, action_shape, hidden_sizes, norm_layer, activation, device,
-            softmax, num_atoms, prior_std, use_dueling, use_ensemble, last_layer
+            softmax, num_atoms, prior_std, use_dueling, last_layers
         )
         if self.use_dueling:
             self.forward = getattr(self, '_dueling_forward')
@@ -463,12 +449,11 @@ class NoisyNet(HyperNet):
         num_atoms: int = 1,
         prior_std: float = 0,
         use_dueling: bool = False,
-        use_ensemble: bool = False,
-        last_layer: Optional[Tuple[Dict[str, Any], Dict[str, Any]]] = None
+        last_layers: Optional[Tuple[Dict[str, Any], Dict[str, Any]]] = None
     ) -> None:
         super().__init__(
             state_shape,action_shape, hidden_sizes, norm_layer, activation, device,
-            softmax, num_atoms, prior_std, use_dueling, use_ensemble, last_layer
+            softmax, num_atoms, prior_std, use_dueling, last_layers
         )
 
 
@@ -485,12 +470,11 @@ class EnsembleNet(BaseNet):
         num_atoms: int = 1,
         prior_std: float = 0,
         use_dueling: bool = False,
-        use_ensemble: bool = False,
-        last_layer: Optional[Tuple[Dict[str, Any], Dict[str, Any]]] = None
+        last_layers: Optional[Tuple[Dict[str, Any], Dict[str, Any]]] = None
     ) -> None:
         super().__init__(
             state_shape,action_shape, hidden_sizes, norm_layer, activation, device,
-            softmax, num_atoms, prior_std, use_dueling, use_ensemble, last_layer
+            softmax, num_atoms, prior_std, use_dueling, last_layers
         )
         if self.use_dueling:
             self.forward = getattr(self, '_dueling_forward')

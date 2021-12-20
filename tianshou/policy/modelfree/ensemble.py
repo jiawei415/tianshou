@@ -81,7 +81,7 @@ class EnsembleDQNPolicy(DQNPolicy):
         self.active_head_train = None
         self.active_head_test = None
         self.active_head_update = None
-        if self.action_select_scheme is None:
+        if self.action_select_scheme == "Greedy":
             assert self.action_sample_num == 1
             self.get_actions = getattr(self, '_greedy_action_select')
         elif self.action_select_scheme == 'MAX':
@@ -240,7 +240,7 @@ class EnsembleC51Policy(C51Policy):
         self.active_head_train = None
         self.active_head_test = None
         self.active_head_update = None
-        if self.action_select_scheme is None:
+        if self.action_select_scheme == "Greedy":
             assert self.action_sample_num == 1
             self.get_actions = getattr(self, '_greedy_action_select')
         elif self.action_select_scheme == 'MAX':

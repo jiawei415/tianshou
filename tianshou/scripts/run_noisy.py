@@ -13,11 +13,11 @@ from torch.utils.tensorboard import SummaryWriter
 
 from tianshou.data import Collector, PrioritizedVectorReplayBuffer, VectorReplayBuffer
 from tianshou.env import DummyVectorEnv
-from tianshou.policy import  HyperDQNPolicy, HyperC51Policy
+from tianshou.policy import NoisyDQNPolicy, NoisyC51Policy
 from tianshou.trainer import offpolicy_trainer
 from tianshou.utils import TensorboardLogger, import_module_or_data, read_config_dict
-from tianshou.utils.net.common import HyperNet
-from tianshou.utils.net.discrete import NewHyperLinear
+from tianshou.utils.net.common import NoisyNet
+from tianshou.utils.net.discrete import NewNoisyLinear
 
 
 def trunc_normal_init(module):
@@ -73,14 +73,10 @@ def get_args():
     parser.add_argument('--v-max', type=float, default=100.)
     parser.add_argument('--num-atoms', type=int, default=51)
     # algorithm config
-    parser.add_argument('--alg-type', type=str, default="hyper")
-    parser.add_argument('--noise-std', type=float, default=1.)
-    parser.add_argument('--noise-dim', type=int, default=2, help="Greater than 0 means using HyperModel")
+    parser.add_argument('--alg-type', type=str, default="noisy")
+    parser.add_argument('--noisy-std', type=float, default=0.1, help="Greater than 0 means using NoisyNet")
     parser.add_argument('--prior-std', type=float, default=1., help="Greater than 0 means using priormodel")
     parser.add_argument('--prior-scale', type=float, default=10.)
-    parser.add_argument('--target-noise-std', type=float, default=0.)
-    parser.add_argument('--hyper-reg-coef', type=float, default=0.01)
-    parser.add_argument('--hyper-weight-decay', type=float, default=0.0003125)
     # network config
     parser.add_argument('--hidden-sizes', type=int, nargs='*', default=[64, 64])
     parser.add_argument('--use-dueling', action="store_true", default=True)
@@ -103,13 +99,13 @@ def get_args():
     parser.add_argument('--eps-train', type=float, default=0.)
     parser.add_argument('--sample-per-step', action="store_true", default=False)
     parser.add_argument('--action-sample-num', type=int, default=1)
-    parser.add_argument('--action-select-scheme', type=str, default=None, help='MAX, VIDS')
+    parser.add_argument('--action-select-scheme', type=str, default="Greedy", help='MAX, VIDS, Greedy')
     parser.add_argument('--value-gap-eps', type=float, default=1e-3)
     parser.add_argument('--value-var-eps', type=float, default=1e-3)
     # other confing
     parser.add_argument('--save-interval', type=int, default=4)
     parser.add_argument('--save-buffer', action="store_true", default=False)
-    parser.add_argument('--logdir', type=str, default='./results')
+    parser.add_argument('--logdir', type=str, default='~/results/tianshou')
     parser.add_argument('--render', type=float, default=0.)
     parser.add_argument('--resume', action="store_true", default=False)
     parser.add_argument('--resume-path', type=str, default='')
@@ -118,7 +114,7 @@ def get_args():
     parser.add_argument('--device', type=str, default='cuda' if torch.cuda.is_available() else 'cpu')
     # overwrite config
     parser.add_argument('--config', type=str, default="{}",
-                        help="game config eg., {'seed':2021,'size':20,'hidden_sizes':[128,128],'noise_dim':2,'prior_std':2,'num_atoms':51}")
+                        help="game config eg., {'seed':2021,'size':20,'hidden_sizes':[128,128],'prior_std':2,'num_atoms':51}")
     args = parser.parse_known_args()[0]
     return args
 
@@ -152,13 +148,13 @@ def main(args=get_args()):
     # model
     last_layer_params = {
         'device': args.device,
-        'noise_dim': args.noise_dim,
+        'noisy_std': args.noisy_std,
         'prior_std': args.prior_std,
         'prior_scale': args.prior_scale,
         'batch_noise': args.batch_noise_update
     }
     def last_layer(x, y):
-        return NewHyperLinear(x, y, **last_layer_params)
+        return NewNoisyLinear(x, y, **last_layer_params)
 
     model_params = {
         "state_shape": args.state_shape,
@@ -174,7 +170,7 @@ def main(args=get_args()):
         model_params['last_layers'] = ({ "last_layer": last_layer}, {"last_layer": last_layer})
     else:
         model_params['last_layers'] = ({ "last_layer": last_layer}, )
-    model = HyperNet(**model_params).to(args.device)
+    model = NoisyNet(**model_params).to(args.device)
 
     if args.init_type == "trunc_normal":
         model.apply(trunc_normal_init)
@@ -188,16 +184,9 @@ def main(args=get_args()):
     print(f"Network parameters: {sum(param.numel() for param in model.parameters())}")
 
     # optimizer
-    if args.hyper_reg_coef:
-        args.hyper_weight_decay = 0
-    trainable_params = [
-            {'params': (p for name, p in model.named_parameters() if 'priormodel' not in name and 'hypermodel' not in name), 'weight_decay': args.weight_decay},
-            {'params': (p for name, p in model.named_parameters() if 'priormodel' not in name and 'hypermodel' in name), 'weight_decay': args.hyper_weight_decay},
-        ]
-    optim = torch.optim.Adam(trainable_params, lr=args.lr)
+    optim = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
 
     # policy
-    hyper_reg_coef = args.hyper_reg_coef / (args.prior_std ** 2) if args.prior_std else args.hyper_reg_coef
     policy_params = {
         "model": model,
         "optim": optim,
@@ -211,16 +200,12 @@ def main(args=get_args()):
         "sample_per_step": args.sample_per_step,
         "action_sample_num": args.action_sample_num,
         "action_select_scheme": args.action_select_scheme,
-        "noise_std": args.noise_std,
-        "noise_dim": args.noise_dim,
-        "hyper_reg_coef": hyper_reg_coef,
-        "use_target_noise": bool(args.target_noise_std)
     }
     if args.num_atoms > 1:
         policy_params.update({'num_atoms': args.num_atoms, 'v_max': args.v_max, 'v_min': -args.v_max})
-        policy = HyperC51Policy(**policy_params).to(args.device)
+        policy = NoisyC51Policy(**policy_params).to(args.device)
     else:
-        policy = HyperDQNPolicy(**policy_params).to(args.device)
+        policy = NoisyDQNPolicy(**policy_params).to(args.device)
 
     if args.evaluation:
         policy_path =  os.path.join(args.policy_path, 'policy.pth')
@@ -253,22 +238,15 @@ def main(args=get_args()):
         buf = VectorReplayBuffer(args.buffer_size, buffer_num=len(train_envs))
 
     # collector
-    target_noise_dim = args.noise_dim * 2 if model.use_dueling else args.noise_dim
-    train_collector = Collector(
-        policy,
-        train_envs,
-        buf,
-        exploration_noise=False,
-        target_noise_dim=target_noise_dim,
-        target_noise_std=args.target_noise_std
-    )
+    train_collector = Collector(policy, train_envs, buf, exploration_noise=False)
     test_collector = Collector(policy, test_envs, exploration_noise=False)
     train_collector.collect(n_step=args.min_buffer_size, random=True)
 
     # log
     log_file = f"{args.task[:-3].lower()}_{args.seed}_{time.strftime('%Y%m%d%H%M%S', time.localtime())}"
     log_path = os.path.join(args.logdir, args.task, args.alg_type.lower(), log_file)
-    os.makedirs(log_path, exist_ok=True)
+    log_path = os.path.expanduser(log_path)
+    os.makedirs(os.path.expanduser(log_path), exist_ok=True)
     writer = SummaryWriter(log_path)
     logger = TensorboardLogger(writer, save_interval=args.save_interval)
     with open(os.path.join(log_path, "config.json"), "wt") as f:
@@ -371,9 +349,7 @@ if __name__ == '__main__':
     env_name = args.task[:-3].lower()
     args.min_buffer_size = args.size if env_name.startswith('deepsea') else args.max_step
     config = read_config_dict(args.config)
-    alg_config = import_module_or_data(f"tianshou.config.{env_name}_config.alg_config")
-    alg_config.update(config)
-    for k, v in alg_config.items():
+    for k, v in config.items():
         if k not in args.__dict__.keys():
             print(f'unrecognized config k: {k}, v: {v}, ignored')
             continue

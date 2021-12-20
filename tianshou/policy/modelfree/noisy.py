@@ -49,7 +49,7 @@ class NoisyDQNPolicy(DQNPolicy):
         self.noise_test = None
         self.noise_train = None
         self.noise_update = None
-        if self.action_select_scheme is None:
+        if self.action_select_scheme == "Greedy":
             assert self.action_sample_num == 1
             self.get_actions = getattr(self, '_greedy_action_select')
         elif self.action_select_scheme == 'MAX':
@@ -197,7 +197,7 @@ class NoisyC51Policy(C51Policy):
         self.noise_test = None
         self.noise_train = None
         self.noise_update = None
-        if self.action_select_scheme is None:
+        if self.action_select_scheme == "Greedy":
             assert self.action_sample_num == 1
             self.get_actions = getattr(self, '_greedy_action_select')
         elif self.action_select_scheme == 'MAX':

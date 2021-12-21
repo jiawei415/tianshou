@@ -871,6 +871,34 @@ class EnsembleLinear(nn.Module):
         return out
 
 
+class NewLinear(nn.Module):
+    def __init__(
+        self,
+        in_features: int,
+        out_features: int,
+        device: Optional[Union[str, int, torch.device]],
+        prior_std: float = 0.0,
+        prior_scale: float = 1.,
+    ):
+        super().__init__()
+        self.basedmodel = nn.Linear(in_features, out_features)
+        if prior_std:
+            self.priormodel = nn.Linear(in_features, out_features)
+            for param in self.priormodel.parameters():
+                param.requires_grad = False
+
+        self.device = device
+        self.prior_std = prior_std
+        self.prior_scale = prior_scale
+
+    def forward(self, x: torch.Tensor, prior_x=None, ) -> Tuple[torch.Tensor, Any]:
+        out = self.basedmodel(x)
+        if prior_x is not None and self.prior_std > 0:
+            prior_out = self.priormodel(prior_x)
+            out += prior_out * self.prior_scale
+        return out
+
+
 def noisy_layer_noise(batch, inp_dim, out_dim):
     def f(x):
         return x.sign().mul_(x.abs().sqrt_())

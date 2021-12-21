@@ -543,6 +543,66 @@ class EnsembleNet(BaseNet):
         return logits, state
 
 
+class LinearNet(BaseNet):
+    def __init__(
+        self,
+        state_shape: Union[int, Sequence[int]],
+        action_shape: Union[int, Sequence[int]] = 0,
+        hidden_sizes: Sequence[int] = (),
+        norm_layer: Optional[ModuleType] = None,
+        activation: Optional[ModuleType] = nn.ReLU,
+        device: Union[str, int, torch.device] = "cpu",
+        softmax: bool = False,
+        num_atoms: int = 1,
+        prior_std: float = 0,
+        use_dueling: bool = False,
+        last_layers: Optional[Tuple[Dict[str, Any], Dict[str, Any]]] = None
+    ) -> None:
+        super().__init__(
+            state_shape, action_shape, hidden_sizes, norm_layer, activation, device,
+            softmax, num_atoms, prior_std, use_dueling, last_layers
+        )
+        if self.use_dueling:
+            self.forward = getattr(self, '_dueling_forward')
+        else:
+            self.forward = getattr(self, '_forward')
+
+    def _forward(
+        self,
+        s: Union[np.ndarray, torch.Tensor],
+        state: Any = None,
+        info: Dict[str, Any] = {},
+    ) -> Tuple[torch.Tensor, Any]:
+        """Mapping: s -> flatten (inside MLP)-> logits."""
+        logits = self.basedmodel(s)
+        prior_logits = self.priormodel(s) if self.prior_std else None
+        bsz = logits.shape[0]
+        q = self.Q(logits, prior_logits)
+        q = q.view(bsz, self.action_num, self.num_atoms).squeeze(dim=-1)
+        logits = q
+        if self.softmax:
+            logits = torch.softmax(logits, dim=-1)
+        return logits, state
+
+    def _dueling_forward(
+        self,
+        s: Union[np.ndarray, torch.Tensor],
+        state: Any = None,
+        info: Dict[str, Any] = {},
+    ) -> Tuple[torch.Tensor, Any]:
+        """Mapping: s -> flatten (inside MLP)-> logits."""
+        logits = self.basedmodel(s)
+        prior_logits = self.priormodel(s) if self.prior_std else None
+        bsz = logits.shape[0]
+        q, v = self.Q(logits, prior_logits), self.V(logits, prior_logits)
+        q = q.view(bsz, self.action_num, self.num_atoms).squeeze(dim=-1)
+        v = v.view(bsz, 1, self.num_atoms).squeeze(dim=-1)
+        logits = q - q.mean(dim=1, keepdim=True) + v
+        if self.softmax:
+            logits = torch.softmax(logits, dim=-1)
+        return logits, state
+
+
 class Recurrent(nn.Module):
     """Simple Recurrent network based on LSTM.
 

@@ -25,3 +25,13 @@ register(
     id='DeepSea-v0',
     entry_point='tianshou.env.deepsea:DeepSea',
 )
+
+register(
+    id='CustomizeMDP-v1',
+    entry_point='tianshou.env.customizemdp:CustomizeMDPV1',
+)
+
+register(
+    id='CustomizeMDP-v2',
+    entry_point='tianshou.env.customizemdp:CustomizeMDPV2',
+)

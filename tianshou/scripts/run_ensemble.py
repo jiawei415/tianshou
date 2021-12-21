@@ -78,10 +78,12 @@ def get_args():
     parser.add_argument('--prior-std', type=float, default=1., help="Greater than 0 means using priormodel")
     parser.add_argument('--prior-scale', type=float, default=10.)
     # network config
-    parser.add_argument('--ensemble-sizes', type=int, nargs='*', default=[])
-    parser.add_argument('--hidden-sizes', type=int, nargs='*', default=[64, 64])
+    parser.add_argument('--ensemble-layer', type=int, default=0)
+    parser.add_argument('--ensemble-size', type=int, default=0)
+    parser.add_argument('--hidden-layer', type=int, default=2)
+    parser.add_argument('--hidden-size', type=int, default=64)
     parser.add_argument('--use-dueling', action="store_true", default=True)
-    parser.add_argument('--init-type', type=str, default="None", help="trunc_normal, xavier_uniform, xavier_normal")
+    parser.add_argument('--init-type', type=str, default="", help="trunc_normal, xavier_uniform, xavier_normal")
     # epoch config
     parser.add_argument('--epoch', type=int, default=1000)
     parser.add_argument('--step-per-epoch', type=int, default=1000)
@@ -147,6 +149,7 @@ def main(args=get_args()):
     test_envs.seed(args.seed)
 
     # model
+    args.ensemble_sizes = [args.ensemble_size] * args.ensemble_layer
     last_layer_params = {
         'device': args.device,
         'prior_std': args.prior_std,
@@ -157,6 +160,7 @@ def main(args=get_args()):
     def last_layer(x, y):
         return EnsembleLinear(x, y, **last_layer_params)
 
+    args.hidden_sizes = [args.hidden_size] * args.hidden_layer
     model_params = {
         "state_shape": args.state_shape,
         "action_shape": args.action_shape,
@@ -348,8 +352,6 @@ def main(args=get_args()):
 
 if __name__ == '__main__':
     args = get_args()
-    env_name = args.task[:-3].lower()
-    args.min_buffer_size = args.size if env_name.startswith('deepsea') else args.max_step
     config = read_config_dict(args.config)
     for k, v in config.items():
         if k not in args.__dict__.keys():

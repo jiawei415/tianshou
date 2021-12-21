@@ -82,9 +82,10 @@ def get_args():
     parser.add_argument('--hyper-reg-coef', type=float, default=0.01)
     parser.add_argument('--hyper-weight-decay', type=float, default=0.0003125)
     # network config
-    parser.add_argument('--hidden-sizes', type=int, nargs='*', default=[64, 64])
+    parser.add_argument('--hidden-layer', type=int, default=2)
+    parser.add_argument('--hidden-size', type=int, default=64)
     parser.add_argument('--use-dueling', action="store_true", default=True)
-    parser.add_argument('--init-type', type=str, default="None", help="trunc_normal, xavier_uniform, xavier_normal")
+    parser.add_argument('--init-type', type=str, default="", help="trunc_normal, xavier_uniform, xavier_normal")
     # epoch config
     parser.add_argument('--epoch', type=int, default=1000)
     parser.add_argument('--step-per-epoch', type=int, default=1000)
@@ -160,6 +161,7 @@ def main(args=get_args()):
     def last_layer(x, y):
         return NewHyperLinear(x, y, **last_layer_params)
 
+    args.hidden_sizes = [args.hidden_size] * args.hidden_layer
     model_params = {
         "state_shape": args.state_shape,
         "action_shape": args.action_shape,
@@ -369,8 +371,6 @@ def main(args=get_args()):
 
 if __name__ == '__main__':
     args = get_args()
-    env_name = args.task[:-3].lower()
-    args.min_buffer_size = args.size if env_name.startswith('deepsea') else args.max_step
     config = read_config_dict(args.config)
     for k, v in config.items():
         if k not in args.__dict__.keys():

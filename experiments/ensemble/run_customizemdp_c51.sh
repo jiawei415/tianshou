@@ -72,7 +72,6 @@ do
     --hidden-layer=${hidden_layer} --hidden-size=${hidden_size} --init-type=${init_type} \
     --epoch=${epoch} --step-per-collect=${step_per_collect} \
     --buffer-size=${buffer_size} --min-buffer-size=${min_buffer_size} \
-    # --logdir='' \
     --config ${config} \
     > ~/logs/${alg_type}_${task}_${tag}_3.out 2> ~/logs/${alg_type}_${task}_${tag}_3.err &
     echo "run $seed $tag"
@@ -80,4 +79,4 @@ do
     sleep ${time}
 done
 
-# ps -ef | grep DeepSea | awk '{print $2}'| xargs kill -9
+# ps -ef | grep CustomizeMDP-v1 | awk '{print $2}'| xargs kill -9

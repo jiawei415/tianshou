@@ -58,7 +58,7 @@ config07="{'prior_std':0,'sample_per_step':False,'same_noise_update':False,'use_
 ## W/O. Prior -- Sample per step -- Independent noise update
 config08="{'prior_std':0,'sample_per_step':True,'same_noise_update':False,'use_dueling':${use_dueling}}"
 
-config="${config01}"
+config=${config01}
 
 time=2
 for i in $(seq 5)
@@ -75,12 +75,11 @@ do
     --hidden-layer=${hidden_layer} --hidden-size=${hidden_size} --init-type=${init_type} \
     --epoch=${epoch} --step-per-collect=${step_per_collect} \
     --buffer-size=${buffer_size} --min-buffer-size=${min_buffer_size} \
-    # --logdir='' \
-    --config ${config} \
+    --config "${config01}" \
     > ~/logs/${alg_type}_${task}_${tag}_3.out 2> ~/logs/${alg_type}_${task}_${tag}_3.err &
     echo "run $seed $tag"
     let seed=$seed+1
     sleep ${time}
 done
 
-# ps -ef | grep DeepSea | awk '{print $2}'| xargs kill -9
+# ps -ef | grep CustomizeMDP-v1 | awk '{print $2}'| xargs kill -9

@@ -1,55 +1,21 @@
 import argparse
 import os
-import math
 import time
 import json
 import pickle
 import pprint
-import gym
 import numpy as np
 import torch
-import torch.nn as nn
 from torch.utils.tensorboard import SummaryWriter
 
 from tianshou.data import Collector, PrioritizedVectorReplayBuffer, VectorReplayBuffer
 from tianshou.env import DummyVectorEnv
+from tianshou.env.utils import make_env
 from tianshou.policy import  HyperDQNPolicy, HyperC51Policy
 from tianshou.trainer import offpolicy_trainer
 from tianshou.utils import TensorboardLogger, import_module_or_data, read_config_dict
-from tianshou.utils.net.common import HyperNet
+from tianshou.utils.net.common import HyperNet, trunc_normal_init, xavier_normal_init, xavier_uniform_init
 from tianshou.utils.net.discrete import NewHyperLinear
-
-
-def trunc_normal_init(module):
-    classname = module.__class__.__name__
-    if classname == "Linear":
-        bound = 1.0 / math.sqrt(module.in_features)
-        nn.init.trunc_normal_(module.weight, std=bound, a=-2*bound, b=2*bound)
-        nn.init.zeros_(module.bias)
-
-
-def xavier_uniform_init(module):
-    classname = module.__class__.__name__
-    if classname == "Linear":
-        gain = 1.0
-        nn.init.xavier_uniform_(module.weight, gain=gain)
-        nn.init.zeros_(module.bias)
-
-
-def xavier_normal_init(module):
-    classname = module.__class__.__name__
-    if classname == "Linear":
-        gain = 1.0
-        nn.init.xavier_normal_(module.weight, gain=gain)
-        nn.init.zeros_(module.bias)
-
-
-def make_env(env_name, max_step=None, size=10, seed=2021):
-    env_config = {'size': size, 'seed':seed, 'mapping_seed': seed} if 'DeepSea' in env_name else {}
-    env = gym.make(env_name, **env_config)
-    if max_step is not None:
-        env._max_episode_steps = max_step
-    return env
 
 
 def get_args():
@@ -57,7 +23,8 @@ def get_args():
     # environment config
     parser.add_argument('--task', type=str, default='MountainCar-v0')
     parser.add_argument('--max-step', type=int, default=500)
-    parser.add_argument('--size', type=int, default=20)
+    parser.add_argument('--size', type=int, default=20, help="only for DeepSea-v0")
+    parser.add_argument('--length', type=int, default=20, help="only for CustomizeMDP-v1/v2")
     parser.add_argument('--seed', type=int, default=2021)
     parser.add_argument('--norm-obs', action="store_true", default=False)
     parser.add_argument('--norm-ret', action="store_true", default=False)
@@ -118,7 +85,7 @@ def get_args():
     parser.add_argument('--policy-path', type=str, default='')
     parser.add_argument('--device', type=str, default='cuda' if torch.cuda.is_available() else 'cpu')
     # overwrite config
-    parser.add_argument('--config', type=str, default="{'prior_std':0,}",
+    parser.add_argument('--config', type=str, default="{}",
                         help="game config eg., {'seed':2021,'size':20,'hidden_sizes':[128,128],'noise_dim':2,'prior_std':0,'num_atoms':51}")
     args = parser.parse_known_args()[0]
     return args
@@ -131,16 +98,22 @@ def main(args=get_args()):
             env_name=args.task,
             max_step=args.max_step,
             size=args.size,
+            length=args.length,
             seed=seed,
         )
     # you can also use tianshou.env.SubprocVectorEnv
     train_envs = DummyVectorEnv([make_thunk(seed=args.seed)], norm_obs=args.norm_obs)
     test_envs = DummyVectorEnv([make_thunk(seed=args.seed)], norm_obs=args.norm_obs)
-    if 'DeepSea' in args.task:
+    if args.task.startswith('DeepSea'):
         train_action_mappling = np.array([action_mapping() for action_mapping in train_envs.get_action_mapping])
         test_action_mappling = np.array([action_mapping() for action_mapping in test_envs.get_action_mapping])
         assert (train_action_mappling == test_action_mappling).all()
         args.max_step = args.size
+    elif args.task.startswith('CustomizeMDP'):
+        train_all_rewards = np.array([get_rewards() for get_rewards in train_envs._get_rewards])
+        test_all_rewards = np.array([get_rewards() for get_rewards in test_envs._get_rewards])
+        assert (train_all_rewards == test_all_rewards).all()
+        args.max_step = args.length
     args.state_shape = train_envs.observation_space[0].shape or train_envs.observation_space[0].n
     args.action_shape = train_envs.action_space[0].shape or train_envs.action_space[0].n
 

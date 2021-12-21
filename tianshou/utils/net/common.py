@@ -6,6 +6,30 @@ from torch import nn
 
 ModuleType = Type[nn.Module]
 
+def trunc_normal_init(module):
+    import math
+    classname = module.__class__.__name__
+    if classname == "Linear":
+        bound = 1.0 / math.sqrt(module.in_features)
+        nn.init.trunc_normal_(module.weight, std=bound, a=-2*bound, b=2*bound)
+        nn.init.zeros_(module.bias)
+
+
+def xavier_uniform_init(module):
+    classname = module.__class__.__name__
+    if classname == "Linear":
+        gain = 1.0
+        nn.init.xavier_uniform_(module.weight, gain=gain)
+        nn.init.zeros_(module.bias)
+
+
+def xavier_normal_init(module):
+    classname = module.__class__.__name__
+    if classname == "Linear":
+        gain = 1.0
+        nn.init.xavier_normal_(module.weight, gain=gain)
+        nn.init.zeros_(module.bias)
+
 
 def miniblock(
     input_size: int,

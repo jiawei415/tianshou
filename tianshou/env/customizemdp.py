@@ -10,7 +10,7 @@ class CustomizeMDPV1(gym.Env):
         self._length = length
         self._rng = np.random.RandomState(seed)
         self._final_reward = self._rng.randint(2)
-        self._remaining_reward= self._rng.uniform(0, reward_threshold, size=length-1)
+        self._remaining_reward= self._rng.uniform(0, reward_threshold, size=length-1).astype(np.float32)
 
         self._row = 0
         self._column = 0
@@ -22,6 +22,10 @@ class CustomizeMDPV1(gym.Env):
     @property
     def action_space(self):
         return spaces.Discrete(2)
+
+    def _get_rewards(self):
+        all_rewards = np.concatenate([np.array([self._final_reward]), self._remaining_reward])
+        return all_rewards
 
     def _get_observation(self):
         obs = np.zeros(shape=(2, self._length), dtype=np.float32)
@@ -91,6 +95,10 @@ class CustomizeMDPV2(gym.Env):
     @property
     def action_space(self):
         return spaces.Discrete(2)
+
+    def _get_rewards(self):
+        all_rewards = self._all_rewards
+        return all_rewards
 
     def _get_observation(self):
         obs = np.zeros(shape=(2, self._length), dtype=np.float32)

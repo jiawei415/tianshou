@@ -34,13 +34,7 @@ class NoiseWrapper(gym.Wrapper):
         state, reward, done, info = self.env.step(action)
         return np.hstack([self.now_noise, state]), reward, done, info
 
-def make_env(env_name, max_step=None, size=10, length=10, seed=2021):
-    if env_name.startswith("DeepSea"):
-        env_config = {'size': size, 'seed':seed, 'mapping_seed': seed}
-    elif env_name.startswith("CustomizeMDP"):
-        env_config = {'length': length, 'seed':seed}
-    else:
-        env_config =  {}
+def make_env(env_name, max_step=None, env_config={}):
     env = gym.make(env_name, **env_config)
     if max_step is not None:
         env._max_episode_steps = max_step

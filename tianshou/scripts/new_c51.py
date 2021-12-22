@@ -141,8 +141,8 @@ def main(args=get_args()):
     train_envs = DummyVectorEnv([make_thunk(seed=args.seed)], norm_obs=args.norm_obs)
     test_envs = DummyVectorEnv([make_thunk(seed=args.seed)], norm_obs=args.norm_obs)
     if 'DeepSea' in args.task:
-        train_action_mappling = np.array([action_mapping() for action_mapping in train_envs.get_action_mapping])
-        test_action_mappling = np.array([action_mapping() for action_mapping in test_envs.get_action_mapping])
+        train_action_mappling = np.array([action_mapping() for action_mapping in train_envs._get_action_mapping])
+        test_action_mappling = np.array([action_mapping() for action_mapping in test_envs._get_action_mapping])
         assert (train_action_mappling == test_action_mappling).all()
     args.state_shape = train_envs.observation_space[0].shape or train_envs.observation_space[0].n
     args.action_shape = train_envs.action_space[0].shape or train_envs.action_space[0].n

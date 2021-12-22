@@ -25,6 +25,7 @@ def get_args():
     parser.add_argument('--max-step', type=int, default=500)
     parser.add_argument('--size', type=int, default=20, help="only for DeepSea-v0")
     parser.add_argument('--length', type=int, default=20, help="only for CustomizeMDP-v1/v2")
+    parser.add_argument('--final-reward', type=int, default=2, help="only for CustomizeMDP-v1/v2. If it is not 0 or 1, it means randomly generated")
     parser.add_argument('--seed', type=int, default=2021)
     parser.add_argument('--norm-obs', action="store_true", default=False)
     parser.add_argument('--norm-ret', action="store_true", default=False)
@@ -91,23 +92,23 @@ def get_args():
 
 def main(args=get_args()):
     # environment
-    def make_thunk(seed):
-        return lambda: make_env(
-            env_name=args.task,
-            max_step=args.max_step,
-            size=args.size,
-            length=args.length,
-            seed=seed,
-        )
+    if args.task.startswith("DeepSea"):
+        env_config = {'seed':args.seed, 'size': args.size, 'mapping_seed': args.seed}
+    elif args.task.startswith("CustomizeMDP"):
+        env_config = {'seed':args.seed, 'length': args.length, 'final_reward': args.final_reward}
+    else:
+        env_config = {}
+    def make_thunk():
+        return lambda: make_env(env_name=args.task, max_step=args.max_step, env_config=env_config)
     # you can also use tianshou.env.SubprocVectorEnv
-    train_envs = DummyVectorEnv([make_thunk(seed=args.seed)], norm_obs=args.norm_obs)
-    test_envs = DummyVectorEnv([make_thunk(seed=args.seed)], norm_obs=args.norm_obs)
-    if args.task.startswith('DeepSea'):
-        train_action_mappling = np.array([action_mapping() for action_mapping in train_envs.get_action_mapping])
-        test_action_mappling = np.array([action_mapping() for action_mapping in test_envs.get_action_mapping])
+    train_envs = DummyVectorEnv([make_thunk()], norm_obs=args.norm_obs)
+    test_envs = DummyVectorEnv([make_thunk()], norm_obs=args.norm_obs)
+    if args.task.startswith('DeepSea') or args.task.startswith('CustomizeMDP'):
+        train_action_mappling = np.array([action_mapping() for action_mapping in train_envs._get_action_mapping])
+        test_action_mappling = np.array([action_mapping() for action_mapping in test_envs._get_action_mapping])
         assert (train_action_mappling == test_action_mappling).all()
         args.max_step = args.size
-    elif args.task.startswith('CustomizeMDP'):
+    if args.task.startswith('CustomizeMDP'):
         train_all_rewards = np.array([get_rewards() for get_rewards in train_envs._get_rewards])
         test_all_rewards = np.array([get_rewards() for get_rewards in test_envs._get_rewards])
         assert (train_all_rewards == test_all_rewards).all()

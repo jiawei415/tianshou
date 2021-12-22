@@ -899,6 +899,86 @@ class NewLinear(nn.Module):
         return out
 
 
+class MultiHyperLinear(nn.Module):
+    def __init__(
+        self,
+        in_features: int,
+        out_features: int,
+        device: Optional[Union[str, int, torch.device]],
+        noise_dim: int,
+        prior_std: float = 1.,
+        prior_scale: float = 1.,
+        batch_noise: bool = True,
+        action_num: int = 2,
+        **kwargs,
+    ) -> None:
+        super().__init__()
+
+        # Learnable parameters.
+        num_atoms = out_features // action_num
+        inp_dim = noise_dim
+        out_dim = in_features * num_atoms + num_atoms
+        self.hypermodel = nn.ModuleList([
+            nn.Linear(inp_dim, out_dim) for _ in range(action_num)
+        ])
+        if prior_std > 0:
+            self.priormodel = nn.ModuleList([
+                PriorHyperLinear(inp_dim, out_dim, prior_std=prior_std) for _ in range(action_num)
+            ])
+            for param in self.priormodel.parameters():
+                param.requires_grad = False
+
+        self.base_forward = getattr(self, "base_forward_v1") if batch_noise else getattr(self, "base_forward_v2")
+
+        self.action_num = action_num
+        self.device = device
+        self.noise_dim = noise_dim
+        self.prior_std = prior_std
+        self.prior_scale = prior_scale
+        self.splited_size = [in_features * num_atoms, num_atoms]
+        self.weight_shape = (in_features, num_atoms) if batch_noise else (num_atoms, num_atoms)
+        self.bias_shape = (1, num_atoms) if batch_noise else (num_atoms,)
+
+    def base_forward_v1(self, x: torch.Tensor, params: torch.Tensor):
+        weight, bias = params.split(self.splited_size, dim=1)
+        weight = weight.reshape((-1,) + self.weight_shape)
+        bias = bias.reshape((-1,) + self.bias_shape)
+        x = x.unsqueeze(dim=1)
+        out = torch.bmm(x, weight) + bias
+        return out.squeeze()
+
+    def base_forward_v2(self, x: torch.Tensor, params: torch.Tensor):
+        weight, bias = params.split(self.splited_size, dim=1)
+        weight = weight.reshape((-1,) + self.weight_shape).squeeze()
+        bias = bias.reshape((-1,) + self.bias_shape).squeeze()
+        out = F.linear(x, weight, bias)
+        return out
+
+    def forward(self, x: torch.Tensor, prior_x=None, noise: Dict[str, Any]={}) -> torch.Tensor:
+        hyper_noise = noise['hyper_noise'].to(self.device)
+        out = []
+        for i in range(self.action_num):
+            params = self.hypermodel[i](hyper_noise)
+            out.append(self.base_forward(x, params))
+        out = torch.cat(out, dim=-1)
+        if prior_x is not None and self.prior_std > 0:
+            prior_out = []
+            for i in range(self.action_num):
+                prior_params = self.priormodel[i](hyper_noise)
+                prior_out.append(self.base_forward(prior_x, prior_params))
+            prior_out = torch.cat(prior_out, dim=-1)
+            out += prior_out * self.prior_scale
+        return out
+
+    def regularization(self, noise: Dict[str, Any]={}, p: int = 2) -> torch.Tensor:
+        hyper_noise = noise['hyper_noise'].to(self.device)
+        reg_loss = 0
+        for i in range(self.action_num):
+            params = self.hypermodel[0](hyper_noise)
+            reg_loss += torch.norm(params, dim=1, p=p).square().mean()
+        return reg_loss
+
+
 def noisy_layer_noise(batch, inp_dim, out_dim):
     def f(x):
         return x.sign().mul_(x.abs().sqrt_())

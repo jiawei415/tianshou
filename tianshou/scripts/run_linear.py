@@ -74,7 +74,7 @@ def get_args():
     parser.add_argument('--device', type=str, default='cuda' if torch.cuda.is_available() else 'cpu')
     # overwrite config
     parser.add_argument('--config', type=str, default="{}",
-                        help="game config eg., {'seed':2021,'size':20,'hidden_sizes':[128,128],'noise_dim':2,'prior_std':0,'num_atoms':51}")
+                        help="game config eg., {'seed':2021,'size':20,'hidden_size':128,'noise_dim':2,'prior_std':0,'num_atoms':51}")
     args = parser.parse_known_args()[0]
     return args
 

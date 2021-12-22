@@ -9,6 +9,7 @@ MountainCar-v0 DeepSea-v0, Acrobot-v1
 ### Quick Experiments
 ```bash
 ## run hyper
+pip install -e .
 cd experiments/hyper
 sh run_deepsea_c51.sh 0 2020 # 0 for cuda devices 2020 for seed
 ```

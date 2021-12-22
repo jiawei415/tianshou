@@ -61,8 +61,8 @@ class DeepSea(gym.Env):
         self.observation_space = Discrete(self._size**2)
         self.action_space = Discrete(n=2)
 
-    def get_action_mapping(self):
-        return np.diag(self._action_mapping)
+    def _get_action_mapping(self):
+        return self._action_mapping.flatten()
 
     def _get_observation(self):
         obs = np.zeros(shape=(self._size, self._size), dtype=np.float32)

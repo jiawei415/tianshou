@@ -4,6 +4,7 @@ seed=$2
 ## environment config
 task=CustomizeMDP-v1 # v2
 length=10
+final_reward=2
 ## training config
 same_noise_update=True
 batch_noise_update=True
@@ -60,7 +61,7 @@ time=2
 for i in $(seq 5)
 do
     tag=$(date "+%Y%m%d%H%M%S")
-    python -m tianshou.scripts.run_${alg_type} --seed ${seed} --task ${task} --length ${length} \
+    python -m tianshou.scripts.run_${alg_type} --seed ${seed} --task ${task} --length ${length} --final-reward ${final_reward} \
     --target-update-freq=${target_update_freq} --batch-size=${batch_size} --lr=${lr} \
     --weight-decay=${weight_decay} --v-max=${v_max} --num-atoms=${num_atoms} \
     --noisy-std=${noisy_std} --prior-std=${prior_std} --prior-scale=${prior_scale} \

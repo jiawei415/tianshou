@@ -13,6 +13,7 @@ class CustomizeMDPV1(gym.Env):
         final_reward: int = 2,
         reward_threshold: Optional[float] = 0.5,
         randomize_actions: bool = True,
+        **kwargs,
     ):
         super().__init__()
         self._length = length
@@ -98,6 +99,7 @@ class CustomizeMDPV2(gym.Env):
         length: int = 5,
         seed: Optional[int] = None,
         randomize_actions: bool = True,
+        **kwargs,
     ):
         super().__init__()
         self._length = length

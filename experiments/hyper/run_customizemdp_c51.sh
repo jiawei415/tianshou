@@ -4,6 +4,7 @@ seed=$2
 ## environment config
 task=CustomizeMDP-v1 # v2
 length=10
+final_reward=2
 ## training config
 same_noise_update=True
 batch_noise_update=True
@@ -32,6 +33,7 @@ value_var_eps=0.001
 hidden_layer=2
 hidden_size=64
 use_dueling=True
+use_multihyper=0
 init_type=trunc_normal
 ## epoch config
 epoch=1000
@@ -64,7 +66,7 @@ time=2
 for i in $(seq 5)
 do
     tag=$(date "+%Y%m%d%H%M%S")
-    python -m tianshou.scripts.run_${alg_type} --seed ${seed} --task ${task} --length ${length} \
+    python -m tianshou.scripts.run_${alg_type} --seed ${seed} --task ${task} --length ${length} --final-reward ${final_reward} \
     --target-update-freq=${target_update_freq} --batch-size=${batch_size} --lr=${lr} \
     --weight-decay=${weight_decay} --v-max=${v_max} --num-atoms=${num_atoms} \
     --noise-std=${noise_std} --noise-dim=${noise_dim} --target-noise-std=${target_noise_std} \
@@ -72,7 +74,7 @@ do
     --hyper-reg-coef=${hyper_reg_coef} --hyper-weight-decay=${hyper_weight_decay} \
     --action-sample-num=${action_sample_num} --action-select-scheme=${action_select_scheme} \
     --value-gap-eps=${value_gap_eps} --value-var-eps=${value_var_eps} \
-    --hidden-layer=${hidden_layer} --hidden-size=${hidden_size} --init-type=${init_type} \
+    --hidden-layer=${hidden_layer} --hidden-size=${hidden_size} --use-multihyper=${use_multihyper} --init-type=${init_type} \
     --epoch=${epoch} --step-per-collect=${step_per_collect} \
     --buffer-size=${buffer_size} --min-buffer-size=${min_buffer_size} \
     --config "${config01}" \

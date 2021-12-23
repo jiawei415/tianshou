@@ -113,6 +113,7 @@ def main(args=get_args()):
         test_all_rewards = np.array([get_rewards() for get_rewards in test_envs._get_rewards])
         assert (train_all_rewards == test_all_rewards).all()
         args.max_step = args.length
+        args.final_reward = train_all_rewards[0][0]
     args.state_shape = train_envs.observation_space[0].shape or train_envs.observation_space[0].n
     args.action_shape = train_envs.action_space[0].shape or train_envs.action_space[0].n
 

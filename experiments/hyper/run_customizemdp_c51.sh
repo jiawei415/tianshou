@@ -77,7 +77,7 @@ do
     --hidden-layer=${hidden_layer} --hidden-size=${hidden_size} --use-multihyper=${use_multihyper} --init-type=${init_type} \
     --epoch=${epoch} --step-per-collect=${step_per_collect} \
     --buffer-size=${buffer_size} --min-buffer-size=${min_buffer_size} \
-    --config "${config01}" \
+    --config "${config}" \
     > ~/logs/${alg_type}_${task}_${tag}_3.out 2> ~/logs/${alg_type}_${task}_${tag}_3.err &
     echo "run $seed $tag"
     let seed=$seed+1

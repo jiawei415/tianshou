@@ -3,7 +3,7 @@ from typing import Any
 import gym
 import numpy as np
 import cloudpickle
-
+from .atari_wrapper import wrap_atari
 
 class CloudpickleWrapper(object):
     """A cloudpickle wrapper used in SubprocVectorEnv."""
@@ -39,3 +39,10 @@ def make_env(env_name, max_step=None, env_config={}):
     if max_step is not None:
         env._max_episode_steps = max_step
     return env
+
+def make_atari_env(args):
+    return wrap_atari(args.task, frame_stack=args.frames_stack, episode_life=True)
+
+def make_atari_env_watch(args):
+    return wrap_atari(args.task, frame_stack=args.frames_stack, episode_life=False, clip_rewards=False,
+                      max_episode_steps=int(27e3))

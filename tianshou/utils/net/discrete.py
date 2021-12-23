@@ -672,6 +672,7 @@ class NewNoisyLinear(nn.Module):
         noisy_std: float,
         prior_std: float = 1.,
         prior_scale: float = 1.,
+        posterior_scale: float = 1.,
         batch_noise: bool = False,
         **kwargs,
     ) -> None:
@@ -701,6 +702,7 @@ class NewNoisyLinear(nn.Module):
         self.sigma = noisy_std
         self.prior_std = prior_std
         self.prior_scale = prior_scale
+        self.posterior_scale = posterior_scale
 
         self.init_params()
 
@@ -734,7 +736,7 @@ class NewNoisyLinear(nn.Module):
         out = self.base_forward(x, eps_p.clone(), eps_q.clone())
         if prior_x is not None and self.prior_std > 0:
             prior_out = self.priormodel(prior_x, eps_p.clone(), eps_q.clone())
-            out += prior_out * self.prior_scale
+            out = out * self.posterior_scale + prior_out * self.prior_scale
         return out
 
     def extra_repr(self):
@@ -752,6 +754,7 @@ class NewHyperLinear(nn.Module):
         noise_dim: int,
         prior_std: float = 1.,
         prior_scale: float = 1.,
+        posterior_scale: float = 1.,
         batch_noise: bool = True,
         **kwargs,
     ) -> None:
@@ -773,6 +776,7 @@ class NewHyperLinear(nn.Module):
         self.noise_dim = noise_dim
         self.prior_std = prior_std
         self.prior_scale = prior_scale
+        self.posterior_scale = posterior_scale
         self.splited_size = [in_features * out_features, out_features]
         self.weight_shape = (in_features, out_features) if batch_noise else (out_features, in_features)
         self.bias_shape = (1, out_features) if batch_noise else (out_features,)
@@ -802,7 +806,7 @@ class NewHyperLinear(nn.Module):
         if prior_x is not None and self.prior_std > 0:
             prior_params = self.priormodel(hyper_noise)
             prior_out = self.base_forward(prior_x, prior_params)
-            out += prior_out * self.prior_scale
+            out = out * self.posterior_scale + prior_out * self.prior_scale
         return out
 
     def regularization(self, noise: Dict[str, Any]={}, p: int = 2) -> torch.Tensor:
@@ -825,6 +829,7 @@ class EnsembleLinear(nn.Module):
         ensemble_sizes: Sequence[int] = (),
         prior_std: float = 0.0,
         prior_scale: float = 1.,
+        posterior_scale: float = 1.,
     ):
         super().__init__()
         self.basedmodel = nn.ModuleList([
@@ -842,6 +847,7 @@ class EnsembleLinear(nn.Module):
         self.head_list = list(range(self.ensemble_num))
         self.prior_std = prior_std
         self.prior_scale = prior_scale
+        self.posterior_scale = posterior_scale
 
     def mlp(self, inp_dim, out_dim, hidden_sizes, bias=True):
         if len(hidden_sizes) == 0:
@@ -862,12 +868,12 @@ class EnsembleLinear(nn.Module):
             if prior_x is not None and self.prior_std > 0:
                 prior_out = [self.priormodel[k](x) for k in active_head]
                 prior_out = torch.stack(prior_out, dim=1)
-                out += prior_out * self.prior_scale
+                out = out * self.posterior_scale + prior_out * self.prior_scale
         else:
             out = self.basedmodel[active_head](x)
             if prior_x is not None and self.prior_std > 0:
                 prior_out = self.priormodel[active_head](x)
-                out += prior_out * self.prior_scale
+                out = out * self.posterior_scale + prior_out * self.prior_scale
         return out
 
 
@@ -879,6 +885,7 @@ class NewLinear(nn.Module):
         device: Optional[Union[str, int, torch.device]],
         prior_std: float = 0.0,
         prior_scale: float = 1.,
+        posterior_scale: float = 1.,
     ):
         super().__init__()
         self.basedmodel = nn.Linear(in_features, out_features)
@@ -890,12 +897,13 @@ class NewLinear(nn.Module):
         self.device = device
         self.prior_std = prior_std
         self.prior_scale = prior_scale
+        self.posterior_scale = posterior_scale
 
     def forward(self, x: torch.Tensor, prior_x=None, ) -> Tuple[torch.Tensor, Any]:
         out = self.basedmodel(x)
         if prior_x is not None and self.prior_std > 0:
             prior_out = self.priormodel(prior_x)
-            out += prior_out * self.prior_scale
+            out = out * self.posterior_scale + prior_out * self.prior_scale
         return out
 
 
@@ -908,6 +916,7 @@ class MultiHyperLinear(nn.Module):
         noise_dim: int,
         prior_std: float = 1.,
         prior_scale: float = 1.,
+        posterior_scale: float = 1.,
         batch_noise: bool = True,
         action_num: int = 2,
         **kwargs,
@@ -935,6 +944,7 @@ class MultiHyperLinear(nn.Module):
         self.noise_dim = noise_dim
         self.prior_std = prior_std
         self.prior_scale = prior_scale
+        self.posterior_scale = posterior_scale
         self.splited_size = [in_features * num_atoms, num_atoms]
         self.weight_shape = (in_features, num_atoms) if batch_noise else (num_atoms, num_atoms)
         self.bias_shape = (1, num_atoms) if batch_noise else (num_atoms,)
@@ -967,7 +977,7 @@ class MultiHyperLinear(nn.Module):
                 prior_params = self.priormodel[i](hyper_noise)
                 prior_out.append(self.base_forward(prior_x, prior_params))
             prior_out = torch.cat(prior_out, dim=-1)
-            out += prior_out * self.prior_scale
+            out = out * self.posterior_scale + prior_out * self.prior_scale
         return out
 
     def regularization(self, noise: Dict[str, Any]={}, p: int = 2) -> torch.Tensor:

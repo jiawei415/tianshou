@@ -44,7 +44,8 @@ def get_args():
     parser.add_argument('--noise-std', type=float, default=1.)
     parser.add_argument('--noise-dim', type=int, default=2, help="Greater than 0 means using HyperModel")
     parser.add_argument('--prior-std', type=float, default=1., help="Greater than 0 means using priormodel")
-    parser.add_argument('--prior-scale', type=float, default=10.)
+    parser.add_argument('--prior-scale', type=float, default=0.1)
+    parser.add_argument('--posterior-scale', type=float, default=0.1)
     parser.add_argument('--target-noise-std', type=float, default=0.)
     parser.add_argument('--hyper-reg-coef', type=float, default=0.01)
     parser.add_argument('--hyper-weight-decay', type=float, default=0.0003125)
@@ -111,6 +112,7 @@ def main(args=get_args()):
         'noise_dim': args.noise_dim,
         'prior_std': args.prior_std,
         'prior_scale': args.prior_scale,
+        'posterior_scale': args.posterior_scale,
         'batch_noise': args.batch_noise_update,
         'action_num': args.action_shape,
     }

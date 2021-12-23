@@ -45,6 +45,7 @@ def get_args():
     parser.add_argument('--noisy-std', type=float, default=0.1, help="Greater than 0 means using NoisyNet")
     parser.add_argument('--prior-std', type=float, default=1., help="Greater than 0 means using priormodel")
     parser.add_argument('--prior-scale', type=float, default=10.)
+    parser.add_argument('--posterior-scale', type=float, default=1)
     # network config
     parser.add_argument('--hidden-layer', type=int, default=2)
     parser.add_argument('--hidden-size', type=int, default=64)
@@ -127,6 +128,7 @@ def main(args=get_args()):
         'noisy_std': args.noisy_std,
         'prior_std': args.prior_std,
         'prior_scale': args.prior_scale,
+        'posterior_scale': args.posterior_scale,
         'batch_noise': args.batch_noise_update
     }
     def last_layer(x, y):

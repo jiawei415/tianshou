@@ -43,7 +43,8 @@ def get_args():
     parser.add_argument('--alg-type', type=str, default="ensemble")
     parser.add_argument('--ensemble-num', type=int, default=4, help="Greater than 0 means using EnsembelNet")
     parser.add_argument('--prior-std', type=float, default=1., help="Greater than 0 means using priormodel")
-    parser.add_argument('--prior-scale', type=float, default=10.)
+    parser.add_argument('--prior-scale', type=float, default=0.1)
+    parser.add_argument('--posterior-scale', type=float, default=0.1)
     # network config
     parser.add_argument('--ensemble-layer', type=int, default=0)
     parser.add_argument('--ensemble-size', type=int, default=0)
@@ -108,6 +109,7 @@ def main(args=get_args()):
         'device': args.device,
         'prior_std': args.prior_std,
         'prior_scale': args.prior_scale,
+        'posterior_scale': args.posterior_scale,
         'ensemble_num': args.ensemble_num,
         'ensemble_sizes': args.ensemble_sizes
     }

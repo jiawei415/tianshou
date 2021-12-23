@@ -121,6 +121,41 @@ class MLP(nn.Module):
         return self.model(s.flatten(1))  # type: ignore
 
 
+class Conv(nn.Module):
+    def __init__(
+        self,
+        c: int,
+        h: int,
+        w: int,
+        hidden_size: int = 512,
+        device: Optional[Union[str, int, torch.device]] = None,
+    ):
+        super().__init__()
+        self.device = device
+        self.model = nn.Sequential(
+            nn.Conv2d(c, 32, kernel_size=8, stride=4), nn.ReLU(inplace=True),
+            nn.Conv2d(32, 64, kernel_size=4, stride=2), nn.ReLU(inplace=True),
+            nn.Conv2d(64, 64, kernel_size=3, stride=1), nn.ReLU(inplace=True),
+            nn.Flatten())
+        with torch.no_grad():
+            cnn_output_dim = int(np.prod(
+                self.model(torch.zeros(1, c, h, w)).shape[1:]))
+        self.model = nn.Sequential(
+            self.model,
+            nn.Linear(cnn_output_dim, hidden_size), nn.ReLU(inplace=True)
+        )
+        self.output_dim = hidden_size
+
+    def forward(self, s: Union[np.ndarray, torch.Tensor]) -> torch.Tensor:
+        if self.device is not None:
+            s = torch.as_tensor(
+                s,
+                device=self.device,  # type: ignore
+                dtype=torch.float32,
+            )
+        return self.model(s)  # type: ignore
+
+
 class LastMLP(nn.Module):
     def __init__(
         self,
@@ -366,6 +401,7 @@ class BaseNet(nn.Module):
         num_atoms: int = 1,
         prior_std: float = 0.,
         use_dueling: bool = False,
+        model_type: str = 'mlp',
         last_layers: Optional[Tuple[Dict[str, Any], Dict[str, Any]]] = None,
     ) -> None:
         super().__init__()
@@ -374,21 +410,33 @@ class BaseNet(nn.Module):
         self.num_atoms = num_atoms
         self.prior_std = prior_std
         self.action_num = int(np.prod(action_shape))
-        input_dim = int(np.prod(state_shape))
-        action_dim = int(np.prod(action_shape)) * num_atoms
         self.use_dueling = use_dueling
-        self.basedmodel = MLP(
-            input_dim, 0, hidden_sizes, norm_layer, activation, device
-        )
-        if self.prior_std:
-            self.priormodel = MLP(
+        if model_type == 'mlp':
+            input_dim = int(np.prod(state_shape))
+            self.basedmodel = MLP(
                 input_dim, 0, hidden_sizes, norm_layer, activation, device
             )
-            for param in self.priormodel.parameters():
-                param.requires_grad = False
+            if self.prior_std:
+                self.priormodel = MLP(
+                    input_dim, 0, hidden_sizes, norm_layer, activation, device
+                )
+                for param in self.priormodel.parameters():
+                    param.requires_grad = False
+        elif model_type == 'conv':
+            self.basedmodel = Conv(
+                *state_shape, hidden_sizes[0], device
+            )
+            if self.prior_std:
+                self.priormodel = Conv(
+                    *state_shape, hidden_sizes[0], device
+                )
+                for param in self.priormodel.parameters():
+                    param.requires_grad = False
+        else:
+            raise NotImplementedError(f'not model structure: {model_type}')
         q_layer = last_layers[0]['last_layer']
         self.q_input_dim = self.basedmodel.output_dim
-        self.q_output_dim = action_dim
+        self.q_output_dim = num_atoms * self.action_num
         self.Q = q_layer(self.q_input_dim, self.q_output_dim)
         if self.use_dueling:  # dueling DQN
             assert len(last_layers) > 1
@@ -411,11 +459,12 @@ class HyperNet(BaseNet):
         num_atoms: int = 1,
         prior_std: float = 0,
         use_dueling: bool = False,
+        model_type: str = 'mlp',
         last_layers: Optional[Tuple[Dict[str, Any], Dict[str, Any]]] = None
     ) -> None:
         super().__init__(
             state_shape, action_shape, hidden_sizes, norm_layer, activation, device,
-            softmax, num_atoms, prior_std, use_dueling, last_layers
+            softmax, num_atoms, prior_std, use_dueling, model_type, last_layers
         )
         if self.use_dueling:
             self.forward = getattr(self, '_dueling_forward')
@@ -473,11 +522,12 @@ class NoisyNet(HyperNet):
         num_atoms: int = 1,
         prior_std: float = 0,
         use_dueling: bool = False,
+        model_type: str = 'mlp',
         last_layers: Optional[Tuple[Dict[str, Any], Dict[str, Any]]] = None
     ) -> None:
         super().__init__(
             state_shape,action_shape, hidden_sizes, norm_layer, activation, device,
-            softmax, num_atoms, prior_std, use_dueling, last_layers
+            softmax, num_atoms, prior_std, use_dueling, model_type, last_layers
         )
 
 
@@ -494,11 +544,12 @@ class EnsembleNet(BaseNet):
         num_atoms: int = 1,
         prior_std: float = 0,
         use_dueling: bool = False,
+        model_type: str = 'mlp',
         last_layers: Optional[Tuple[Dict[str, Any], Dict[str, Any]]] = None
     ) -> None:
         super().__init__(
             state_shape,action_shape, hidden_sizes, norm_layer, activation, device,
-            softmax, num_atoms, prior_std, use_dueling, last_layers
+            softmax, num_atoms, prior_std, use_dueling, model_type, last_layers
         )
         if self.use_dueling:
             self.forward = getattr(self, '_dueling_forward')

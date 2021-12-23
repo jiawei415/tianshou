@@ -9,26 +9,25 @@ import torch
 from torch.utils.tensorboard import SummaryWriter
 
 from tianshou.data import Collector, PrioritizedVectorReplayBuffer, VectorReplayBuffer
-from tianshou.env import DummyVectorEnv
-from tianshou.env.utils import make_env
-from tianshou.policy import  HyperDQNPolicy, HyperC51Policy
+from tianshou.env import SubprocVectorEnv
+from tianshou.env.utils import make_atari_env, make_atari_env_watch
+from tianshou.policy import NoisyDQNPolicy, NoisyC51Policy
 from tianshou.trainer import offpolicy_trainer
 from tianshou.utils import TensorboardLogger, import_module_or_data, read_config_dict
-from tianshou.utils.net.common import HyperNet, trunc_normal_init, xavier_normal_init, xavier_uniform_init
-from tianshou.utils.net.discrete import NewHyperLinear, MultiHyperLinear
+from tianshou.utils.net.common import NoisyNet, trunc_normal_init, xavier_normal_init, xavier_uniform_init
+from tianshou.utils.net.discrete import NewNoisyLinear
 
 
 def get_args():
     parser = argparse.ArgumentParser()
     # environment config
-    parser.add_argument('--task', type=str, default='MountainCar-v0')
-    parser.add_argument('--max-step', type=int, default=500)
-    parser.add_argument('--size', type=int, default=20, help="only for DeepSea-v0")
-    parser.add_argument('--length', type=int, default=20, help="only for CustomizeMDP-v1/v2")
-    parser.add_argument('--final-reward', type=int, default=2, help="only for CustomizeMDP-v1/v2. If it is not 0 or 1, it means randomly generated")
+    parser.add_argument('--task', type=str, default='PongNoFrameskip-v4')
+    parser.add_argument('--frames-stack', type=int, default=4)
     parser.add_argument('--seed', type=int, default=2021)
     parser.add_argument('--norm-obs', action="store_true", default=False)
     parser.add_argument('--norm-ret', action="store_true", default=False)
+    parser.add_argument('--training-num', type=int, default=1)
+    parser.add_argument('--test-num', type=int, default=1)
     # training config
     parser.add_argument('--same-noise-update', action="store_true", default=True)
     parser.add_argument('--batch-noise-update', action="store_true", default=True)
@@ -41,19 +40,14 @@ def get_args():
     parser.add_argument('--v-max', type=float, default=100.)
     parser.add_argument('--num-atoms', type=int, default=51)
     # algorithm config
-    parser.add_argument('--alg-type', type=str, default="hyper")
-    parser.add_argument('--noise-std', type=float, default=1.)
-    parser.add_argument('--noise-dim', type=int, default=2, help="Greater than 0 means using HyperModel")
+    parser.add_argument('--alg-type', type=str, default="noisy")
+    parser.add_argument('--noisy-std', type=float, default=0.1, help="Greater than 0 means using NoisyNet")
     parser.add_argument('--prior-std', type=float, default=1., help="Greater than 0 means using priormodel")
     parser.add_argument('--prior-scale', type=float, default=10.)
-    parser.add_argument('--target-noise-std', type=float, default=0.)
-    parser.add_argument('--hyper-reg-coef', type=float, default=0.01)
-    parser.add_argument('--hyper-weight-decay', type=float, default=0.0003125)
     # network config
-    parser.add_argument('--hidden-layer', type=int, default=2)
+    parser.add_argument('--hidden-layer', type=int, default=1)
     parser.add_argument('--hidden-size', type=int, default=64)
     parser.add_argument('--use-dueling', action="store_true", default=True)
-    parser.add_argument('--use-multihyper', type=int, default=1, help="1 means use")
     parser.add_argument('--init-type', type=str, default="", help="trunc_normal, xavier_uniform, xavier_normal")
     # epoch config
     parser.add_argument('--epoch', type=int, default=1000)
@@ -63,7 +57,7 @@ def get_args():
     parser.add_argument('--episode-per-test', type=int, default=10)
     # buffer confing
     parser.add_argument('--buffer-size', type=int, default=int(2e5))
-    parser.add_argument('--min-buffer-size', type=int, default=500)
+    parser.add_argument('--min-buffer-size', type=int, default=128)
     parser.add_argument('--prioritized', action="store_true", default=False)
     parser.add_argument('--alpha', type=float, default=0.6)
     parser.add_argument('--beta', type=float, default=0.4)
@@ -88,35 +82,15 @@ def get_args():
     parser.add_argument('--device', type=str, default='cuda' if torch.cuda.is_available() else 'cpu')
     # overwrite config
     parser.add_argument('--config', type=str, default="{}",
-                        help="game config eg., {'seed':2021,'size':20,'hidden_size':128,'noise_dim':2,'prior_std':0,'num_atoms':51}")
+                        help="game config eg., {'seed':2021,'hidden_size':128,'prior_std':2,'num_atoms':51}")
     args = parser.parse_known_args()[0]
     return args
 
 
 def main(args=get_args()):
     # environment
-    if args.task.startswith("DeepSea"):
-        env_config = {'seed':args.seed, 'size': args.size, 'mapping_seed': args.seed}
-    elif args.task.startswith("CustomizeMDP"):
-        env_config = {'seed':args.seed, 'length': args.length, 'final_reward': args.final_reward}
-    else:
-        env_config = {}
-    def make_thunk():
-        return lambda: make_env(env_name=args.task, max_step=args.max_step, env_config=env_config)
-    # you can also use tianshou.env.SubprocVectorEnv
-    train_envs = DummyVectorEnv([make_thunk()], norm_obs=args.norm_obs)
-    test_envs = DummyVectorEnv([make_thunk()], norm_obs=args.norm_obs)
-    if args.task.startswith('DeepSea') or args.task.startswith('CustomizeMDP'):
-        train_action_mappling = np.array([action_mapping() for action_mapping in train_envs._get_action_mapping])
-        test_action_mappling = np.array([action_mapping() for action_mapping in test_envs._get_action_mapping])
-        assert (train_action_mappling == test_action_mappling).all()
-        args.max_step = args.size
-    if args.task.startswith('CustomizeMDP'):
-        train_all_rewards = np.array([get_rewards() for get_rewards in train_envs._get_rewards])
-        test_all_rewards = np.array([get_rewards() for get_rewards in test_envs._get_rewards])
-        assert (train_all_rewards == test_all_rewards).all()
-        args.max_step = args.length
-        args.final_reward = train_all_rewards[0][0]
+    train_envs = SubprocVectorEnv([lambda: make_atari_env(args) for _ in range(args.training_num)])
+    test_envs = SubprocVectorEnv([lambda: make_atari_env_watch(args) for _ in range(args.test_num)])
     args.state_shape = train_envs.observation_space[0].shape or train_envs.observation_space[0].n
     args.action_shape = train_envs.action_space[0].shape or train_envs.action_space[0].n
 
@@ -129,19 +103,13 @@ def main(args=get_args()):
     # model
     last_layer_params = {
         'device': args.device,
-        'noise_dim': args.noise_dim,
+        'noisy_std': args.noisy_std,
         'prior_std': args.prior_std,
         'prior_scale': args.prior_scale,
-        'batch_noise': args.batch_noise_update,
-        'action_num': args.action_shape,
+        'batch_noise': args.batch_noise_update
     }
-    def q_last_layer(x, y):
-        if args.use_multihyper:
-            return MultiHyperLinear(x, y, **last_layer_params)
-        else:
-            return NewHyperLinear(x, y, **last_layer_params)
-    def v_last_layer(x, y):
-        return NewHyperLinear(x, y, **last_layer_params)
+    def last_layer(x, y):
+        return NewNoisyLinear(x, y, **last_layer_params)
 
     args.hidden_sizes = [args.hidden_size] * args.hidden_layer
     model_params = {
@@ -153,12 +121,13 @@ def main(args=get_args()):
         "num_atoms": args.num_atoms,
         "prior_std": args.prior_std,
         "use_dueling": args.use_dueling,
+        "model_type": 'conv'
     }
     if args.use_dueling:
-        model_params['last_layers'] = ({ "last_layer": q_last_layer}, {"last_layer": v_last_layer})
+        model_params['last_layers'] = ({ "last_layer": last_layer}, {"last_layer": last_layer})
     else:
-        model_params['last_layers'] = ({ "last_layer": q_last_layer}, )
-    model = HyperNet(**model_params).to(args.device)
+        model_params['last_layers'] = ({ "last_layer": last_layer}, )
+    model = NoisyNet(**model_params).to(args.device)
 
     if args.init_type == "trunc_normal":
         model.apply(trunc_normal_init)
@@ -172,16 +141,9 @@ def main(args=get_args()):
     print(f"Network parameters: {sum(param.numel() for param in model.parameters())}")
 
     # optimizer
-    if args.hyper_reg_coef:
-        args.hyper_weight_decay = 0
-    trainable_params = [
-            {'params': (p for name, p in model.named_parameters() if 'priormodel' not in name and 'hypermodel' not in name), 'weight_decay': args.weight_decay},
-            {'params': (p for name, p in model.named_parameters() if 'priormodel' not in name and 'hypermodel' in name), 'weight_decay': args.hyper_weight_decay},
-        ]
-    optim = torch.optim.Adam(trainable_params, lr=args.lr)
+    optim = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
 
     # policy
-    hyper_reg_coef = args.hyper_reg_coef / (args.prior_std ** 2) if args.prior_std else args.hyper_reg_coef
     policy_params = {
         "model": model,
         "optim": optim,
@@ -195,16 +157,12 @@ def main(args=get_args()):
         "sample_per_step": args.sample_per_step,
         "action_sample_num": args.action_sample_num,
         "action_select_scheme": args.action_select_scheme,
-        "noise_std": args.noise_std,
-        "noise_dim": args.noise_dim,
-        "hyper_reg_coef": hyper_reg_coef,
-        "use_target_noise": bool(args.target_noise_std)
     }
     if args.num_atoms > 1:
         policy_params.update({'num_atoms': args.num_atoms, 'v_max': args.v_max, 'v_min': -args.v_max})
-        policy = HyperC51Policy(**policy_params).to(args.device)
+        policy = NoisyC51Policy(**policy_params).to(args.device)
     else:
-        policy = HyperDQNPolicy(**policy_params).to(args.device)
+        policy = NoisyDQNPolicy(**policy_params).to(args.device)
 
     if args.evaluation:
         policy_path =  os.path.join(args.policy_path, 'policy.pth')
@@ -215,7 +173,7 @@ def main(args=get_args()):
             print("Successfully restore policy.")
         else:
             print("Fail to restore policy.")
-        env = DummyVectorEnv([make_thunk(seed=args.seed)])
+        env = SubprocVectorEnv([lambda: make_atari_env_watch(args)])
         policy.eval()
         policy.set_eps(args.eps_test)
         collector = Collector(policy, env)
@@ -237,15 +195,7 @@ def main(args=get_args()):
         buf = VectorReplayBuffer(args.buffer_size, buffer_num=len(train_envs))
 
     # collector
-    target_noise_dim = args.noise_dim * 2 if model.use_dueling else args.noise_dim
-    train_collector = Collector(
-        policy,
-        train_envs,
-        buf,
-        exploration_noise=False,
-        target_noise_dim=target_noise_dim,
-        target_noise_std=args.target_noise_std
-    )
+    train_collector = Collector(policy, train_envs, buf, exploration_noise=False)
     test_collector = Collector(policy, test_envs, exploration_noise=False)
     train_collector.collect(n_step=args.min_buffer_size, random=True)
 
@@ -258,6 +208,7 @@ def main(args=get_args()):
     logger = TensorboardLogger(writer, save_interval=args.save_interval)
     with open(os.path.join(log_path, "config.json"), "wt") as f:
         kvs = vars(args)
+        kvs.pop('config')
         f.write(json.dumps(kvs, indent=4) + '\n')
         f.flush()
         f.close()

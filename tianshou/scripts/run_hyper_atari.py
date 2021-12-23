@@ -9,8 +9,8 @@ import torch
 from torch.utils.tensorboard import SummaryWriter
 
 from tianshou.data import Collector, PrioritizedVectorReplayBuffer, VectorReplayBuffer
-from tianshou.env import DummyVectorEnv
-from tianshou.env.utils import make_env
+from tianshou.env import SubprocVectorEnv
+from tianshou.env.utils import make_atari_env, make_atari_env_watch
 from tianshou.policy import  HyperDQNPolicy, HyperC51Policy
 from tianshou.trainer import offpolicy_trainer
 from tianshou.utils import TensorboardLogger, import_module_or_data, read_config_dict
@@ -21,14 +21,13 @@ from tianshou.utils.net.discrete import NewHyperLinear, MultiHyperLinear
 def get_args():
     parser = argparse.ArgumentParser()
     # environment config
-    parser.add_argument('--task', type=str, default='MountainCar-v0')
-    parser.add_argument('--max-step', type=int, default=500)
-    parser.add_argument('--size', type=int, default=20, help="only for DeepSea-v0")
-    parser.add_argument('--length', type=int, default=20, help="only for CustomizeMDP-v1/v2")
-    parser.add_argument('--final-reward', type=int, default=2, help="only for CustomizeMDP-v1/v2. If it is not 0 or 1, it means randomly generated")
+    parser.add_argument('--task', type=str, default='PongNoFrameskip-v4')
+    parser.add_argument('--frames-stack', type=int, default=4)
     parser.add_argument('--seed', type=int, default=2021)
     parser.add_argument('--norm-obs', action="store_true", default=False)
     parser.add_argument('--norm-ret', action="store_true", default=False)
+    parser.add_argument('--training-num', type=int, default=1)
+    parser.add_argument('--test-num', type=int, default=1)
     # training config
     parser.add_argument('--same-noise-update', action="store_true", default=True)
     parser.add_argument('--batch-noise-update', action="store_true", default=True)
@@ -50,7 +49,7 @@ def get_args():
     parser.add_argument('--hyper-reg-coef', type=float, default=0.01)
     parser.add_argument('--hyper-weight-decay', type=float, default=0.0003125)
     # network config
-    parser.add_argument('--hidden-layer', type=int, default=2)
+    parser.add_argument('--hidden-layer', type=int, default=1)
     parser.add_argument('--hidden-size', type=int, default=64)
     parser.add_argument('--use-dueling', action="store_true", default=True)
     parser.add_argument('--use-multihyper', type=int, default=1, help="1 means use")
@@ -63,7 +62,7 @@ def get_args():
     parser.add_argument('--episode-per-test', type=int, default=10)
     # buffer confing
     parser.add_argument('--buffer-size', type=int, default=int(2e5))
-    parser.add_argument('--min-buffer-size', type=int, default=500)
+    parser.add_argument('--min-buffer-size', type=int, default=128)
     parser.add_argument('--prioritized', action="store_true", default=False)
     parser.add_argument('--alpha', type=float, default=0.6)
     parser.add_argument('--beta', type=float, default=0.4)
@@ -88,35 +87,15 @@ def get_args():
     parser.add_argument('--device', type=str, default='cuda' if torch.cuda.is_available() else 'cpu')
     # overwrite config
     parser.add_argument('--config', type=str, default="{}",
-                        help="game config eg., {'seed':2021,'size':20,'hidden_size':128,'noise_dim':2,'prior_std':0,'num_atoms':51}")
+                        help="game config eg., {'seed':2021,hidden_size':128,'noise_dim':2,'prior_std':0,'num_atoms':51}")
     args = parser.parse_known_args()[0]
     return args
 
 
 def main(args=get_args()):
     # environment
-    if args.task.startswith("DeepSea"):
-        env_config = {'seed':args.seed, 'size': args.size, 'mapping_seed': args.seed}
-    elif args.task.startswith("CustomizeMDP"):
-        env_config = {'seed':args.seed, 'length': args.length, 'final_reward': args.final_reward}
-    else:
-        env_config = {}
-    def make_thunk():
-        return lambda: make_env(env_name=args.task, max_step=args.max_step, env_config=env_config)
-    # you can also use tianshou.env.SubprocVectorEnv
-    train_envs = DummyVectorEnv([make_thunk()], norm_obs=args.norm_obs)
-    test_envs = DummyVectorEnv([make_thunk()], norm_obs=args.norm_obs)
-    if args.task.startswith('DeepSea') or args.task.startswith('CustomizeMDP'):
-        train_action_mappling = np.array([action_mapping() for action_mapping in train_envs._get_action_mapping])
-        test_action_mappling = np.array([action_mapping() for action_mapping in test_envs._get_action_mapping])
-        assert (train_action_mappling == test_action_mappling).all()
-        args.max_step = args.size
-    if args.task.startswith('CustomizeMDP'):
-        train_all_rewards = np.array([get_rewards() for get_rewards in train_envs._get_rewards])
-        test_all_rewards = np.array([get_rewards() for get_rewards in test_envs._get_rewards])
-        assert (train_all_rewards == test_all_rewards).all()
-        args.max_step = args.length
-        args.final_reward = train_all_rewards[0][0]
+    train_envs = SubprocVectorEnv([lambda: make_atari_env(args) for _ in range(args.training_num)])
+    test_envs = SubprocVectorEnv([lambda: make_atari_env_watch(args) for _ in range(args.test_num)])
     args.state_shape = train_envs.observation_space[0].shape or train_envs.observation_space[0].n
     args.action_shape = train_envs.action_space[0].shape or train_envs.action_space[0].n
 
@@ -153,6 +132,7 @@ def main(args=get_args()):
         "num_atoms": args.num_atoms,
         "prior_std": args.prior_std,
         "use_dueling": args.use_dueling,
+        "model_type": 'conv'
     }
     if args.use_dueling:
         model_params['last_layers'] = ({ "last_layer": q_last_layer}, {"last_layer": v_last_layer})
@@ -215,7 +195,7 @@ def main(args=get_args()):
             print("Successfully restore policy.")
         else:
             print("Fail to restore policy.")
-        env = DummyVectorEnv([make_thunk(seed=args.seed)])
+        env = SubprocVectorEnv([lambda: make_atari_env_watch(args)])
         policy.eval()
         policy.set_eps(args.eps_test)
         collector = Collector(policy, env)

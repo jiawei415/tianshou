@@ -607,11 +607,12 @@ class LinearNet(BaseNet):
         num_atoms: int = 1,
         prior_std: float = 0,
         use_dueling: bool = False,
+        model_type: str = 'mlp',
         last_layers: Optional[Tuple[Dict[str, Any], Dict[str, Any]]] = None
     ) -> None:
         super().__init__(
             state_shape, action_shape, hidden_sizes, norm_layer, activation, device,
-            softmax, num_atoms, prior_std, use_dueling, last_layers
+            softmax, num_atoms, prior_std, use_dueling, model_type, last_layers
         )
         if self.use_dueling:
             self.forward = getattr(self, '_dueling_forward')

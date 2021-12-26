@@ -15,7 +15,7 @@ from tianshou.policy import  HyperDQNPolicy, HyperC51Policy
 from tianshou.trainer import offpolicy_trainer
 from tianshou.utils import TensorboardLogger, import_module_or_data, read_config_dict
 from tianshou.utils.net.common import HyperNet, trunc_normal_init, xavier_normal_init, xavier_uniform_init
-from tianshou.utils.net.discrete import NewHyperLinear, MultiHyperLinear
+from tianshou.utils.net.discrete import NewHyperLinear
 
 
 def get_args():
@@ -52,9 +52,8 @@ def get_args():
     parser.add_argument('--hyper-weight-decay', type=float, default=0.0003125)
     # network config
     parser.add_argument('--hidden-layer', type=int, default=2)
-    parser.add_argument('--hidden-size', type=int, default=64)
+    parser.add_argument('--hidden-size', type=int, default=512)
     parser.add_argument('--use-dueling', action="store_true", default=True)
-    parser.add_argument('--use-multihyper', type=int, default=1, help="1 means use")
     parser.add_argument('--init-type', type=str, default="", help="trunc_normal, xavier_uniform, xavier_normal")
     # epoch config
     parser.add_argument('--epoch', type=int, default=1000)
@@ -135,14 +134,8 @@ def main(args=get_args()):
         'prior_scale': args.prior_scale,
         'posterior_scale': args.posterior_scale,
         'batch_noise': args.batch_noise_update,
-        'action_num': args.action_shape,
     }
-    def q_last_layer(x, y):
-        if args.use_multihyper:
-            return MultiHyperLinear(x, y, **last_layer_params)
-        else:
-            return NewHyperLinear(x, y, **last_layer_params)
-    def v_last_layer(x, y):
+    def last_layer(x, y):
         return NewHyperLinear(x, y, **last_layer_params)
 
     args.hidden_sizes = [args.hidden_size] * args.hidden_layer
@@ -157,9 +150,9 @@ def main(args=get_args()):
         "use_dueling": args.use_dueling,
     }
     if args.use_dueling:
-        model_params['last_layers'] = ({ "last_layer": q_last_layer}, {"last_layer": v_last_layer})
+        model_params['last_layers'] = ({ "last_layer": last_layer}, {"last_layer": last_layer})
     else:
-        model_params['last_layers'] = ({ "last_layer": q_last_layer}, )
+        model_params['last_layers'] = ({ "last_layer": last_layer}, )
     model = HyperNet(**model_params).to(args.device)
 
     if args.init_type == "trunc_normal":

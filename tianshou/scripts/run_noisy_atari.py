@@ -47,7 +47,7 @@ def get_args():
     parser.add_argument('--posterior-scale', type=float, default=0.1)
     # network config
     parser.add_argument('--hidden-layer', type=int, default=1)
-    parser.add_argument('--hidden-size', type=int, default=64)
+    parser.add_argument('--hidden-size', type=int, default=512)
     parser.add_argument('--use-dueling', action="store_true", default=True)
     parser.add_argument('--init-type', type=str, default="", help="trunc_normal, xavier_uniform, xavier_normal")
     # epoch config

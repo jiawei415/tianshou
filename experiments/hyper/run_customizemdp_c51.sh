@@ -33,7 +33,6 @@ value_var_eps=0.001
 hidden_layer=2
 hidden_size=64
 use_dueling=True
-use_multihyper=0
 init_type=trunc_normal
 ## epoch config
 epoch=1000
@@ -74,7 +73,7 @@ do
     --hyper-reg-coef=${hyper_reg_coef} --hyper-weight-decay=${hyper_weight_decay} \
     --action-sample-num=${action_sample_num} --action-select-scheme=${action_select_scheme} \
     --value-gap-eps=${value_gap_eps} --value-var-eps=${value_var_eps} \
-    --hidden-layer=${hidden_layer} --hidden-size=${hidden_size} --use-multihyper=${use_multihyper} --init-type=${init_type} \
+    --hidden-layer=${hidden_layer} --hidden-size=${hidden_size} --init-type=${init_type} \
     --epoch=${epoch} --step-per-collect=${step_per_collect} \
     --buffer-size=${buffer_size} --min-buffer-size=${min_buffer_size} \
     --config "${config}" \

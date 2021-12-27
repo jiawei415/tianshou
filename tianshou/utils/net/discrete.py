@@ -623,11 +623,11 @@ class NewHyperLinear(nn.Module):
             out = out * self.posterior_scale + prior_out * self.prior_scale
         return out
 
-    def regularization(self, noise: Dict[str, Any]={}, p: int = 2) -> torch.Tensor:
+    def regularization(self, noise: Dict[str, Any]={}) -> torch.Tensor:
         hyper_noise = noise['hyper_noise'].to(self.device)
         params = self.hypermodel(hyper_noise)
-        reg_loss = torch.norm(params, dim=1, p=p).square()
-        return reg_loss.mean()
+        reg_loss = params.pow(2).mean()
+        return reg_loss
 
 
 class EnsembleLinear(nn.Module):
@@ -825,7 +825,7 @@ def sample_noise(model: nn.Module) -> bool:
     """
     done = False
     for m in model.modules():
-        if isinstance(m, NoisyLinear) or isinstance(m, NoisyLinearWithPrior):
+        if isinstance(m, NoisyLinear):
             m.sample()
             done = True
     return done

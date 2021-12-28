@@ -43,7 +43,7 @@ step_per_epoch=50000
 step_per_collect=4
 ## buffer config
 buffer_size=1000000
-min_buffer_size=${batch_size}
+min_buffer_size=50000
 
 ## overwrite config
 ## W. Prior -- Sample per epiosde -- Dependent noise update

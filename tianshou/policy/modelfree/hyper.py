@@ -11,25 +11,36 @@ class SampleNoise():
         self.noise_std = noise_std
         self.noise_dim = noise_dim
         self.noise_norm = noise_norm
-        if use_dueling:
-            self.sample_noise = self._sample_dueling_noise
-        else:
-            self.sample_noise = self._sample_noise
+        self.use_dueling = use_dueling
+        self.sample_noise = self._sample_noise_v1
 
-    def _sample_noise(self, batch_size: int):
-        Q_noise = torch.randn(size=(batch_size, self.noise_dim)) * self.noise_std
+    def _sample_noise_v1(self, batch_size: int):
+        hyper_noise = torch.randn(size=(batch_size, self.noise_dim)) * self.noise_std
         if self.noise_dim > 1 and self.noise_norm:
-            Q_noise = Q_noise / torch.norm(Q_noise, dim=1, keepdim=True)
-        noise = {'Q': {'hyper_noise': Q_noise}}
+            hyper_noise = hyper_noise / torch.norm(hyper_noise, dim=1, keepdim=True)
+        noise = {'Q': {'hyper_noise': hyper_noise}}
+        if self.use_dueling:
+            noise.update({'V': {'hyper_noise': hyper_noise}})
         return noise
 
-    def _sample_dueling_noise(self, batch_size: int):
+    def _sample_noise_v2(self, batch_size: int):
         hyper_noise = torch.randn(size=(batch_size, self.noise_dim * 2)) * self.noise_std
-        Q_noise, V_noise = hyper_noise.split([self.noise_dim, self.noise_dim], dim=1)
         if self.noise_dim > 1 and self.noise_norm:
-            Q_noise = Q_noise / torch.norm(Q_noise, dim=1, keepdim=True)
-            V_noise = V_noise / torch.norm(V_noise, dim=1, keepdim=True)
+            hyper_noise = hyper_noise / torch.norm(hyper_noise, dim=1, keepdim=True)
+        Q_noise, V_noise = hyper_noise.split([self.noise_dim, self.noise_dim], dim=1)
         noise = {'Q': {'hyper_noise': Q_noise}, 'V': {'hyper_noise': V_noise}}
+        return noise
+
+    def _sample_noise_v3(self, batch_size: int):
+        hyper_noise = torch.randn(size=(batch_size, self.noise_dim)) * self.noise_std
+        if self.noise_dim > 1 and self.noise_norm:
+            hyper_noise = hyper_noise / torch.norm(hyper_noise, dim=1, keepdim=True)
+        noise = {'Q': {'hyper_noise': hyper_noise}}
+        if self.use_dueling:
+            hyper_noise = torch.randn(size=(batch_size, self.noise_dim)) * self.noise_std
+            if self.noise_dim > 1 and self.noise_norm:
+                hyper_noise = hyper_noise / torch.norm(hyper_noise, dim=1, keepdim=True)
+            noise.update({'V': {'hyper_noise': hyper_noise}})
         return noise
 
 

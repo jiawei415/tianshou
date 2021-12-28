@@ -1,5 +1,6 @@
 from typing import Any, Dict, List, Optional, Sequence, Tuple, Type, Union
 
+import math
 import numpy as np
 import torch
 from torch import nn
@@ -7,7 +8,6 @@ from torch import nn
 ModuleType = Type[nn.Module]
 
 def trunc_normal_init(module):
-    import math
     classname = module.__class__.__name__
     if classname == "Linear":
         bound = 1.0 / math.sqrt(module.in_features)
@@ -46,6 +46,14 @@ def miniblock(
     if activation is not None:
         layers += [activation()]
     return layers
+
+
+class TFLinear(nn.Linear):
+    def reset_parameters(self) -> None:
+        bound = 1.0 / math.sqrt(self.in_features)
+        nn.init.trunc_normal_(self.weight, std=bound, a=-2*bound, b=2*bound)
+        if self.bias is not None:
+            nn.init.zeros_(self.bias)
 
 
 class MLP(nn.Module):
@@ -145,6 +153,34 @@ class Conv(nn.Module):
             nn.Linear(cnn_output_dim, hidden_size), nn.ReLU(inplace=True)
         )
         self.output_dim = hidden_size
+
+    def forward(self, s: Union[np.ndarray, torch.Tensor]) -> torch.Tensor:
+        if self.device is not None:
+            s = torch.as_tensor(
+                s,
+                device=self.device,  # type: ignore
+                dtype=torch.float32,
+            )
+        return self.model(s)  # type: ignore
+
+
+class Fc(nn.Module):
+    def __init__(
+        self,
+        input_dim: int,
+        hidden_sizes: Sequence[int] = (),
+        device: Optional[Union[str, int, torch.device]] = None,
+        linear_layer: Type[nn.Linear] = nn.Linear,
+    ):
+        super().__init__()
+        self.device = device
+        model = [linear_layer(input_dim, hidden_sizes[0])]
+        model += [nn.ReLU(inplace=True)]
+        for i in range(1, len(hidden_sizes)):
+            model += [linear_layer(hidden_sizes[i-1], hidden_sizes[i])]
+            model += [nn.ReLU(inplace=True)]
+        self.model = nn.Sequential(*model)
+        self.output_dim = hidden_sizes[-1]
 
     def forward(self, s: Union[np.ndarray, torch.Tensor]) -> torch.Tensor:
         if self.device is not None:
@@ -413,23 +449,15 @@ class BaseNet(nn.Module):
         self.use_dueling = use_dueling
         if model_type == 'mlp':
             input_dim = int(np.prod(state_shape))
-            self.basedmodel = MLP(
-                input_dim, 0, hidden_sizes, norm_layer, activation, device
-            )
+            self.basedmodel = Fc(input_dim, hidden_sizes, device)
             if self.prior_std:
-                self.priormodel = MLP(
-                    input_dim, 0, hidden_sizes, norm_layer, activation, device
-                )
+                self.priormodel = Fc(input_dim, hidden_sizes, device)
                 for param in self.priormodel.parameters():
                     param.requires_grad = False
         elif model_type == 'conv':
-            self.basedmodel = Conv(
-                *state_shape, hidden_sizes[0], device
-            )
+            self.basedmodel = Conv(*state_shape, hidden_sizes[0], device)
             if self.prior_std:
-                self.priormodel = Conv(
-                    *state_shape, hidden_sizes[0], device
-                )
+                self.priormodel = Conv(*state_shape, hidden_sizes[0], device)
                 for param in self.priormodel.parameters():
                     param.requires_grad = False
         else:

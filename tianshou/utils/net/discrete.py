@@ -1,5 +1,6 @@
 from typing import Any, Dict, Optional, Sequence, Tuple, Union
 
+import math
 import numpy as np
 import torch
 import torch.nn.functional as F
@@ -392,20 +393,20 @@ class PriorHyperLinear(torch.nn.Module):
         else:
             self.bias = np.ones(output_size, dtype=np.float32) * prior_mean
 
-        # if isinstance(prior_std, np.ndarray):
-        #     if prior_std.ndim == 1:
-        #         assert len(prior_std) == output_size
-        #         self.prior_std = np.diag(prior_std).astype(np.float32)
-        #     elif prior_std.ndim == 2:
-        #         assert prior_std.shape == (output_size, output_size)
-        #         self.prior_std = prior_std
-        #     else:
-        #         raise ValueError
-        # else:
-        #     assert isinstance(prior_std, (float, int, np.float32, np.int32, np.float64, np.int64))
-        #     self.prior_std = np.eye(output_size, dtype=np.float32) * prior_std
+        if isinstance(prior_std, np.ndarray):
+            if prior_std.ndim == 1:
+                assert len(prior_std) == output_size
+                prior_std = np.diag(prior_std).astype(np.float32)
+            elif prior_std.ndim == 2:
+                assert prior_std.shape == (output_size, output_size)
+                prior_std = prior_std
+            else:
+                raise ValueError
+        else:
+            assert isinstance(prior_std, (float, int, np.float32, np.int32, np.float64, np.int64))
+            prior_std = np.eye(output_size, dtype=np.float32) * prior_std
 
-        self.weight = torch.nn.Parameter(torch.from_numpy(self.weight * prior_std).float())
+        self.weight = torch.nn.Parameter(torch.from_numpy(prior_std @ self.weight).float())
         self.bias = torch.nn.Parameter(torch.from_numpy(self.bias).float())
 
         for param in self.parameters():
@@ -801,6 +802,219 @@ class MultiHyperLinear(nn.Module):
             params = self.hypermodel[0](hyper_noise)
             reg_loss += torch.norm(params, dim=1, p=p).square().mean()
         return reg_loss
+
+
+class NewHyperLinearV2(nn.Module):
+    def __init__(
+        self,
+        in_features: int,
+        out_features: int,
+        device: Optional[Union[str, int, torch.device]],
+        noise_dim: int,
+        prior_std: float = 1.,
+        prior_scale: float = 1.,
+        posterior_scale: float = 1.,
+        batch_noise: bool = True,
+        **kwargs,
+    ) -> None:
+        super().__init__()
+
+        self.hypermodel = HyperLinearLayer(noise_dim, (out_features, in_features),
+                                           target_init="tf", device=device)
+        if prior_std > 0:
+            self.priormodel = HyperLinearLayer(noise_dim, (out_features, in_features),
+                                           target_init="tf", device=device)
+            for param in self.priormodel.parameters():
+                param.requires_grad = False
+
+        self.hyper_noise = None
+        self.device = device
+        self.noise_dim = noise_dim
+        self.prior_std = prior_std
+        self.prior_scale = prior_scale
+        self.posterior_scale = posterior_scale
+        self.splited_size = [in_features * out_features, out_features]
+        self.weight_shape = (in_features, out_features) if batch_noise else (out_features, in_features)
+        self.bias_shape = (1, out_features) if batch_noise else (out_features,)
+
+    def forward(self, x: torch.Tensor, prior_x=None, noise: Dict[str, Any]={}) -> torch.Tensor:
+        hyper_noise = noise['hyper_noise'].to(self.device)
+        qs = []
+        for k in range(hyper_noise.shape[0]):
+            q = self.hypermodel(x, hyper_noise[k][None])
+            qs.append(q)
+        q = torch.stack(qs, dim=1)  # (None, num_ensemble, num_action)
+        if prior_x is not None and self.prior_std > 0:
+            prior_qs = []
+            for k in range(hyper_noise.shape[0]):
+                prior_q = self.priormodel(prior_x, hyper_noise[k][None])
+                prior_qs.append(prior_q)
+            prior_q = torch.stack(prior_qs, dim=1)  # (None, num_ensemble, num_action)
+            q = q * self.posterior_scale + prior_q * self.prior_scale
+        if hyper_noise.shape[0] == 1:
+            q = q[:, 0, :]
+        return q
+
+    def regularization(self, noise: Dict[str, Any]={}) -> torch.Tensor:
+        hyper_noise = noise['hyper_noise'].to(self.device)
+        hyper_weight = self.hypermodel.hyper_weight(hyper_noise)
+        hyper_bias = self.hypermodel.hyper_bias(hyper_noise)
+        params = torch.cat([hyper_weight.reshape(len(hyper_noise), -1), hyper_bias.reshape(len(hyper_noise), -1)], dim=1)
+        reg_loss = params.pow(2).mean()
+        return reg_loss
+
+
+class HyperLinearWeight(nn.Module):
+    """
+    A linear hypermodel to generate the ``weight`` for single layer of the base model.
+    """
+    def __init__(
+        self,
+        z_size: int,
+        output_shape: Tuple[int],
+        target_init: str = "tf",
+        has_bias: bool = True,
+        trainable: bool = True,
+        device: Union[str, int, torch.device] = "cpu",
+    ):
+        super().__init__()
+        self.z_size = z_size
+        self.output_shape = output_shape
+        self.target_init = target_init
+        self.has_bias = has_bias
+        self.trainable = trainable
+        self.device = device
+
+        self.num_param = int(np.prod(self.output_shape))
+
+        self.weight = nn.Parameter(torch.empty([self.num_param, self.z_size], dtype=torch.float32, device=self.device))
+        if self.has_bias:
+            self.bias = nn.Parameter(torch.zeros([self.num_param], dtype=torch.float32, device=self.device))
+        else:
+            self.bias = torch.zeros([self.num_param], dtype=torch.float32, device=self.device)
+
+        self.reset_parameters()
+
+        if not self.trainable:
+            for parameter in self.parameters():
+                parameter.requires_grad = False
+
+    def forward(
+        self,
+        z: Union[torch.Tensor, np.ndarray],
+    ) -> torch.Tensor:
+        param = F.linear(z, self.weight, self.bias)
+        param = param.reshape([len(z), *self.output_shape])
+        return param
+
+    def reset_parameters(self):
+        """
+        Initialize the ``weight`` term.
+        TensorFlow: 1/sqrt(f_in) initialization.
+        PyTorch: He Kaiming initialization.
+        """
+        if self.target_init == "tf":
+            f_in = self.output_shape[1]
+            bound = 1.0 / math.sqrt(f_in)
+            nn.init.trunc_normal_(self.weight, std=bound, a=-2 * bound, b=2 * bound)
+        elif self.target_init == "torch":
+            f_in = self.output_shape[1]
+            gain = nn.init.calculate_gain('leaky_relu', math.sqrt(5))
+            std = gain / math.sqrt(f_in)
+            bound = math.sqrt(3.0) * std  # Calculate uniform bounds from standard deviation
+            with torch.no_grad():
+                self.weight.uniform_(-bound, bound)
+        else:
+            raise ValueError(self.target_init)
+
+
+class HyperLinearBias(nn.Module):
+    """
+    A linear hypermodel to generate the ``bias`` for single layer of the base model.
+    """
+    def __init__(
+        self,
+        z_size: int,
+        output_shape: Tuple[int],
+        target_init: str = "tf",
+        has_bias: bool = True,
+        trainable: bool = True,
+        device: Union[str, int, torch.device] = "cpu",
+    ):
+        super().__init__()
+        self.z_size = z_size
+        self.output_shape = output_shape
+        self.output_dim = output_shape[0]
+        self.target_init = target_init
+        self.has_bias = has_bias
+        self.trainable = trainable
+        self.device = device
+
+        self.num_param = self.output_dim
+
+        self.weight = nn.Parameter(torch.empty([self.num_param, self.z_size], dtype=torch.float32, device=self.device))
+        if self.has_bias:
+            self.bias = nn.Parameter(torch.zeros([self.num_param], dtype=torch.float32, device=self.device))
+        else:
+            self.bias = torch.zeros([self.num_param], dtype=torch.float32, device=self.device)
+
+        self.reset_parameters()
+
+        if not self.trainable:
+            for parameter in self.parameters():
+                parameter.requires_grad = False
+
+    def forward(
+        self,
+        z: Union[torch.Tensor, np.ndarray],
+    ) -> torch.Tensor:
+        param = F.linear(z, self.weight, self.bias)
+        return param
+
+    def reset_parameters(self):
+        """
+        Initialize the ``bias`` term.
+        TensorFlow: zero initialization.
+        PyTorch: Unif(1/sqrt(f_in)) initialization.
+        """
+        if self.target_init == "tf":
+            nn.init.zeros_(self.weight)
+        elif self.target_init == "torch":
+            f_in = self.output_shape[1]
+            bound = 1.0 / math.sqrt(f_in)
+            nn.init.uniform(self.weight, -bound, bound)
+        else:
+            raise ValueError(self.target_init)
+
+
+class HyperLinearLayer(nn.Module):
+    """
+    A linear hypermodel to mimic a layer of the base model.
+    """
+    def __init__(
+        self,
+        z_size: int,
+        output_shape: Union[Tuple[int], Any],
+        target_init: str = "tf",
+        has_bias: bool = True,
+        trainable: bool = True,
+        device: Union[str, int, torch.device] = "cpu",
+    ):
+        super().__init__()
+
+        self.hyper_weight = HyperLinearWeight(z_size, output_shape, target_init, has_bias, trainable, device)
+        self.hyper_bias = HyperLinearBias(z_size, output_shape, target_init, has_bias, trainable, device)
+
+    def forward(
+        self,
+        x: torch.Tensor,
+        z: torch.Tensor,
+    ) -> torch.Tensor:
+        weight = self.hyper_weight(z)[0]
+        bias = self.hyper_bias(z)[0]
+
+        h = F.linear(x, weight, bias)
+        return h
 
 
 def noisy_layer_noise(batch, inp_dim, out_dim):

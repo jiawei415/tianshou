@@ -55,6 +55,7 @@ class EnsembleDQNPolicy(DQNPolicy):
         estimation_step: int = 1,
         target_update_freq: int = 0,
         reward_normalization: bool = False,
+        is_double: bool = True,
         use_dueling: bool = True,
         same_noise_update: bool = True,
         batch_noise_update: bool = True,
@@ -67,7 +68,7 @@ class EnsembleDQNPolicy(DQNPolicy):
         **kwargs: Any
     ) -> None:
         super().__init__(
-            model, optim, discount_factor, estimation_step, target_update_freq, reward_normalization, **kwargs
+            model, optim, discount_factor, estimation_step, target_update_freq, reward_normalization, is_double, **kwargs
         )
         self.use_dueling = use_dueling
         self.same_noise_update = same_noise_update
@@ -118,9 +119,15 @@ class EnsembleDQNPolicy(DQNPolicy):
         else:
             main_model_head = self.sample_head(head_num=batch_size)
             target_model_head = self.sample_head(head_num=batch_size)
-        with torch.no_grad():
-            a = self(batch, input="obs_next", active_head=main_model_head).act # (None, ensemble_num)
-            target_q = self(batch, model="model_old", input="obs_next", active_head=target_model_head).logits # (None, ensemble_num, action_num)
+        if self._is_double:
+            with torch.no_grad():
+                a = self(batch, input="obs_next", active_head=main_model_head).act # (None, ensemble_num)
+                target_q = self(batch, model="model_old", input="obs_next", active_head=target_model_head).logits # (None, ensemble_num, action_num)
+        else:
+            with torch.no_grad():
+                target_b = self(batch, model="model_old", input="obs_next", active_head=target_model_head)
+                a = target_b.act # (None, ensemble_num)
+                target_q = target_b.logits # (None, ensemble_num, action_num)
         a_one_hot = F.one_hot(torch.as_tensor(a, device=target_q.device), self.max_action_num).to(torch.float32) # (None, ensemble_num, action_num)
         target_q = torch.sum(target_q * a_one_hot, dim=-1)  # (None, ensemble_num)
         return target_q
@@ -277,9 +284,15 @@ class EnsembleC51Policy(C51Policy):
         else:
             main_model_head = self.sample_head()
             target_model_head = self.sample_head()
-        with torch.no_grad():
-            a = self(batch, input="obs_next", active_head=main_model_head).act # (None, ensemble_num)
-            next_dist = self(batch, model="model_old", input="obs_next", active_head=target_model_head).logits # (None, ensemble_num, action_num, num_atoms)
+        if self._is_double:
+            with torch.no_grad():
+                a = self(batch, input="obs_next", active_head=main_model_head).act # (None, ensemble_num)
+                next_dist = self(batch, model="model_old", input="obs_next", active_head=target_model_head).logits # (None, ensemble_num, action_num, num_atoms)
+        else:
+            with torch.no_grad():
+                next_b = self(batch, model="model_old", input="obs_next", noise=target_model_head)
+                a = next_b.act # (None, ensemble_num)
+                next_dist = next_b.logits # (None, ensemble_num, action_num, num_atoms)
         a_one_hot = F.one_hot(torch.as_tensor(a, device=next_dist.device), self.max_action_num).to(torch.float32) # (None, ensemble_num, action_num)
         next_dist = torch.einsum('bkat,bka->bkt', next_dist, a_one_hot) # (None, ensemble_num, num_atoms)
         support = self.support.view(1, 1, -1, 1).repeat(1, self.ensemble_num, 1, 1) # (1, ensemble_num, num_atoms, 1)

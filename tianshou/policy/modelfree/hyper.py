@@ -6,14 +6,19 @@ from tianshou.policy import C51Policy, DQNPolicy
 from tianshou.data import Batch, ReplayBuffer, to_torch_as, to_numpy
 
 
-def sample_noise(batch_size: int, noise_dim: int, noise_std: float=1.):
+def sample_noise(batch_size: int, noise_dim: int, noise_std: float=1., norm: bool=False):
     Q_noise = torch.randn(size=(batch_size, noise_dim)) * noise_std
+    if noise_dim > 1 and norm:
+        Q_noise = Q_noise / torch.norm(Q_noise, dim=1, keepdim=True)
     noise = {'Q': {'hyper_noise': Q_noise}}
     return noise
 
-def sample_dueling_noise(batch_size: int, noise_dim: int, noise_std: float=1.):
+def sample_dueling_noise(batch_size: int, noise_dim: int, noise_std: float=1, norm: bool=False):
     hyper_noise = torch.randn(size=(batch_size, noise_dim * 2)) * noise_std
     Q_noise, V_noise = hyper_noise.split([noise_dim, noise_dim], dim=1)
+    if noise_dim > 1 and norm:
+        Q_noise = Q_noise / torch.norm(Q_noise, dim=1, keepdim=True)
+        V_noise = V_noise / torch.norm(V_noise, dim=1, keepdim=True)
     noise = {'Q': {'hyper_noise': Q_noise}, 'V': {'hyper_noise': V_noise}}
     return noise
 
@@ -27,6 +32,7 @@ class HyperDQNPolicy(DQNPolicy):
         estimation_step: int = 1,
         target_update_freq: int = 0,
         reward_normalization: bool = False,
+        is_double: bool = True,
         use_dueling: bool = True,
         same_noise_update: bool = True,
         batch_noise_update: bool = True,
@@ -36,13 +42,14 @@ class HyperDQNPolicy(DQNPolicy):
         value_var_eps: float = 1e-3,
         value_gap_eps: float = 1e-3,
         noise_std: float = 1.,
-        noise_dim : int = 2,
+        noise_dim: int = 2,
+        noise_norm: bool = False,
         hyper_reg_coef: float = 0.001,
         use_target_noise: bool = False,
         **kwargs: Any
     ) -> None:
         super().__init__(
-            model, optim, discount_factor, estimation_step, target_update_freq, reward_normalization, **kwargs
+            model, optim, discount_factor, estimation_step, target_update_freq, reward_normalization, is_double, **kwargs
         )
         self.use_dueling = use_dueling
         self.same_noise_update = same_noise_update
@@ -54,6 +61,7 @@ class HyperDQNPolicy(DQNPolicy):
         self.value_gap_eps = value_gap_eps
         self.noise_std = noise_std
         self.noise_dim = noise_dim
+        self.noise_norm = noise_norm
         self.use_target_noise = use_target_noise
         self.hyper_reg_coef = hyper_reg_coef
         self.noise_test = None
@@ -93,12 +101,17 @@ class HyperDQNPolicy(DQNPolicy):
             main_model_noise = self.noise_update
             target_model_noise = self.noise_update
         else:
-            main_model_noise = self.sample_noise(batch_size, self.noise_dim, self.noise_std)
-            target_model_noise = self.sample_noise(batch_size, self.noise_dim, self.noise_std)
-        with torch.no_grad():
-            a = self(batch, model="model", input="obs_next", noise=main_model_noise).act # (None,)
-            target_q = self(batch, model="model_old", input="obs_next", noise=target_model_noise).logits # (None, action_num)
-        target_q = target_q[np.arange(len(a)), a]
+            main_model_noise = self.sample_noise(batch_size, self.noise_dim, self.noise_std, self.noise_norm)
+            target_model_noise = self.sample_noise(batch_size, self.noise_dim, self.noise_std, self.noise_norm)
+        if self._is_double:
+            with torch.no_grad():
+                a = self(batch, model="model", input="obs_next", noise=main_model_noise).act # (None,)
+                target_q = self(batch, model="model_old", input="obs_next", noise=target_model_noise).logits # (None, action_num)
+            target_q = target_q[np.arange(len(a)), a]
+        else:
+            with torch.no_grad():
+                target_q = self(batch, model="model_old", input="obs_next", noise=target_model_noise).logits # (None, action_num)
+            target_q = torch.max(target_q, dim=-1)[0]
         return target_q
 
     def forward(
@@ -117,11 +130,11 @@ class HyperDQNPolicy(DQNPolicy):
             done = len(batch.done.shape) == 0 or batch.done[0]
             if self.training:
                 if self.noise_train is None or self.sample_per_step or done:
-                    self.noise_train = self.sample_noise(self.action_sample_num, self.noise_dim, self.noise_std)
+                    self.noise_train = self.sample_noise(self.action_sample_num, self.noise_dim, self.noise_std, self.noise_norm)
                 noise = self.noise_train
             else:
                 if self.noise_test is None or self.sample_per_step or done:
-                    self.noise_test = self.sample_noise(self.action_sample_num, self.noise_dim, self.noise_std)
+                    self.noise_test = self.sample_noise(self.action_sample_num, self.noise_dim, self.noise_std, self.noise_norm)
                 noise = self.noise_test
             logits, h = model(obs_, state=state, noise=noise, info=batch.info) # (None)
             q = self.compute_q_value(logits, getattr(obs, "mask", None))  # (None,)
@@ -137,7 +150,7 @@ class HyperDQNPolicy(DQNPolicy):
     def update(self, sample_size: int, buffer: Optional[ReplayBuffer], **kwargs: Any) -> Dict[str, Any]:
         kwargs.update({"sample_num": len(buffer)})
         batch, indices = buffer.sample(sample_size)
-        self.noise_update = self.sample_noise(sample_size, self.noise_dim, self.noise_std)
+        self.noise_update = self.sample_noise(sample_size, self.noise_dim, self.noise_std, self.noise_norm)
         self.updating = True
         batch = self.process_fn(batch, buffer, indices)
         result = self.learn(batch, **kwargs)
@@ -151,7 +164,7 @@ class HyperDQNPolicy(DQNPolicy):
         q = self(batch, noise=self.noise_update).logits # (None, action_num)
         act = batch.act # (None,)
         q = q[np.arange(len(act)), act] # (None, )
-        r = to_torch_as(batch.returns.flatten(), q) # (None, )
+        r = to_torch_as(batch.returns, q).squeeze(dim=-1) # (None, )
         if self.use_target_noise:
             if self.use_dueling:
                 update_noise = torch.cat([self.noise_update['Q']['hyper_noise'], self.noise_update['V']['hyper_noise']], dim=1)
@@ -196,7 +209,8 @@ class HyperC51Policy(C51Policy):
         value_var_eps: float = 1e-3,
         value_gap_eps: float = 1e-3,
         noise_std: float = 1.,
-        noise_dim : int = 2,
+        noise_dim: int = 2,
+        noise_norm: bool = False,
         hyper_reg_coef: float = 0.001,
         use_target_noise: bool = False,
         **kwargs: Any
@@ -215,6 +229,7 @@ class HyperC51Policy(C51Policy):
         self.value_gap_eps = value_gap_eps
         self.noise_std = noise_std
         self.noise_dim = noise_dim
+        self.noise_norm = noise_norm
         self.use_target_noise = use_target_noise
         self.hyper_reg_coef = hyper_reg_coef
         self.noise_test = None
@@ -254,11 +269,17 @@ class HyperC51Policy(C51Policy):
             main_model_noise = self.noise_update
             target_model_noise = self.noise_update
         else:
-            main_model_noise = self.sample_noise(batch_size, self.noise_dim, self.noise_std)
-            target_model_noise = self.sample_noise(batch_size, self.noise_dim, self.noise_std)
-        with torch.no_grad():
-            a = self(batch, model="model", input="obs_next", noise=main_model_noise).act # (None,)
-            next_dist = self(batch, model="model_old", input="obs_next", noise=target_model_noise).logits # (None, action_num)
+            main_model_noise = self.sample_noise(batch_size, self.noise_dim, self.noise_std, self.noise_norm)
+            target_model_noise = self.sample_noise(batch_size, self.noise_dim, self.noise_std, self.noise_norm)
+        if self._is_double:
+            with torch.no_grad():
+                a = self(batch, model="model", input="obs_next", noise=main_model_noise).act # (None,)
+                next_dist = self(batch, model="model_old", input="obs_next", noise=target_model_noise).logits # (None, action_num, num_atoms)
+        else:
+            with torch.no_grad():
+                next_b = self(batch, model="model_old", input="obs_next", noise=target_model_noise)
+                a = next_b.act # (None, action_num)
+                next_dist = next_b.logits # (None, action_num, num_atoms)
         next_dist = next_dist[np.arange(len(a)), a, :] # (None, num_atoms)
         support = self.support.view(1, -1, 1) # (1, num_atoms, 1)
         target_support = batch.returns.clamp(self._v_min, self._v_max).unsqueeze(-2) # (None, 1, num_atoms)
@@ -281,11 +302,11 @@ class HyperC51Policy(C51Policy):
             done = len(batch.done.shape) == 0 or batch.done[0]
             if self.training:
                 if self.noise_train is None or self.sample_per_step or done:
-                    self.noise_train = self.sample_noise(self.action_sample_num, self.noise_dim, self.noise_std)
+                    self.noise_train = self.sample_noise(self.action_sample_num, self.noise_dim, self.noise_std, self.noise_norm)
                 noise = self.noise_train
             else:
                 if self.noise_test is None or self.sample_per_step or done:
-                    self.noise_test = self.sample_noise(self.action_sample_num, self.noise_dim, self.noise_std)
+                    self.noise_test = self.sample_noise(self.action_sample_num, self.noise_dim, self.noise_std, self.noise_norm)
                 noise = self.noise_test
             logits, h = model(obs_, state=state, noise=noise, info=batch.info) # (None)
             q = self.compute_q_value(logits, getattr(obs, "mask", None))  # (None,)
@@ -301,7 +322,7 @@ class HyperC51Policy(C51Policy):
     def update(self, sample_size: int, buffer: Optional[ReplayBuffer], **kwargs: Any) -> Dict[str, Any]:
         kwargs.update({"sample_num": len(buffer)})
         batch, indices = buffer.sample(sample_size)
-        self.noise_update = self.sample_noise(sample_size, self.noise_dim, self.noise_std)
+        self.noise_update = self.sample_noise(sample_size, self.noise_dim, self.noise_std, self.noise_norm)
         self.updating = True
         batch = self.process_fn(batch, buffer, indices)
         result = self.learn(batch, **kwargs)

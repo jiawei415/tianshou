@@ -22,6 +22,7 @@ class NoisyDQNPolicy(DQNPolicy):
         estimation_step: int = 1,
         target_update_freq: int = 0,
         reward_normalization: bool = False,
+        is_double: bool = True,
         use_dueling: bool = True,
         same_noise_update: bool = True,
         batch_noise_update: bool = True,
@@ -33,9 +34,10 @@ class NoisyDQNPolicy(DQNPolicy):
         **kwargs: Any
     ) -> None:
         super().__init__(
-            model, optim, discount_factor, estimation_step, target_update_freq, reward_normalization, **kwargs
+            model, optim, discount_factor, estimation_step, target_update_freq, reward_normalization, is_double, **kwargs
         )
-        self.last_layer_inp_dim = model.basedmodel.output_dim
+        assert model.q_input_dim == model.v_input_dim
+        self.last_layer_inp_dim = model.q_input_dim
         self.v_out_dim = model.v_output_dim if use_dueling else 0
         self.q_out_dim = model.q_output_dim
         self.use_dueling = use_dueling
@@ -84,10 +86,15 @@ class NoisyDQNPolicy(DQNPolicy):
         else:
             main_model_noise = self.sample_noise(batch_size)
             target_model_noise = self.sample_noise(batch_size)
-        with torch.no_grad():
-            a = self(batch, model="model", input="obs_next", noise=main_model_noise).act # (None,)
-            target_q = self(batch, model="model_old", input="obs_next", noise=target_model_noise).logits # (None, action_num)
-        target_q = target_q[np.arange(len(a)), a]
+        if self._is_double:
+            with torch.no_grad():
+                a = self(batch, model="model", input="obs_next", noise=main_model_noise).act # (None,)
+                target_q = self(batch, model="model_old", input="obs_next", noise=target_model_noise).logits # (None, action_num)
+            target_q = target_q[np.arange(len(a)), a]
+        else:
+            with torch.no_grad():
+                target_q = self(batch, model="model_old", input="obs_next", noise=target_model_noise).logits # (None, action_num)
+            target_q = torch.max(target_q, dim=-1)[0]
         return target_q
 
     def forward(
@@ -183,7 +190,8 @@ class NoisyC51Policy(C51Policy):
             model, optim, discount_factor, num_atoms, v_min, v_max,
             estimation_step, target_update_freq, reward_normalization, **kwargs
         )
-        self.last_layer_inp_dim = model.basedmodel.output_dim
+        assert model.q_input_dim == model.v_input_dim
+        self.last_layer_inp_dim = model.q_input_dim
         self.v_out_dim = model.v_output_dim if use_dueling else 0
         self.q_out_dim = model.q_output_dim
         self.use_dueling = use_dueling
@@ -232,9 +240,15 @@ class NoisyC51Policy(C51Policy):
         else:
             main_model_noise = self.sample_noise(batch_size)
             target_model_noise = self.sample_noise(batch_size)
-        with torch.no_grad():
-            a = self(batch, model="model", input="obs_next", noise=main_model_noise).act # (None,)
-            next_dist = self(batch, model="model_old", input="obs_next", noise=target_model_noise).logits # (None, action_num)
+        if self._is_double:
+            with torch.no_grad():
+                a = self(batch, model="model", input="obs_next", noise=main_model_noise).act # (None,)
+                next_dist = self(batch, model="model_old", input="obs_next", noise=target_model_noise).logits # (None, action_num, num_atoms)
+        else:
+            with torch.no_grad():
+                next_b = self(batch, model="model_old", input="obs_next", noise=target_model_noise)
+                a = next_b.act # (None, action_num)
+                next_dist = next_b.logits # (None, action_num, num_atoms)
         next_dist = next_dist[np.arange(len(a)), a, :] # (None, num_atoms)
         support = self.support.view(1, -1, 1) # (1, num_atoms, 1)
         target_support = batch.returns.clamp(self._v_min, self._v_max).unsqueeze(-2) # (None, 1, num_atoms)

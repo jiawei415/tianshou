@@ -424,6 +424,73 @@ class NewNet(nn.Module):
         return logits, state
 
 
+class FeatureNet(nn.Module):
+    def __init__(
+        self,
+        state_shape: Union[int, Sequence[int]],
+        hidden_sizes: Sequence[int] = (),
+        device: Union[str, int, torch.device] = "cpu",
+        linear_layer: Type[nn.Linear] = nn.Linear,
+        model_type: str = 'mlp',
+        prior_std: float = 0.,
+    ):
+        super().__init__()
+        self.device = device
+        self.prior_std = prior_std
+        if model_type == 'mlp':
+            input_dim = int(np.prod(state_shape))
+            self.basedmodel = self._mlp(input_dim, hidden_sizes, linear_layer)
+            if self.prior_std:
+                self.priormodel = self._mlp(input_dim, hidden_sizes, linear_layer)
+                for param in self.priormodel.parameters():
+                    param.requires_grad = False
+            self.output_dim = hidden_sizes[-1]
+        elif model_type == 'conv':
+            self.basedmodel = self._conv(*state_shape, hidden_sizes[0], linear_layer)
+            if self.prior_std:
+                self.priormodel = self._conv(*state_shape, hidden_sizes[0], linear_layer)
+                for param in self.priormodel.parameters():
+                    param.requires_grad = False
+            self.output_dim = hidden_sizes[0]
+        else:
+            raise NotImplementedError(f'not model structure: {model_type}')
+
+    def forward(self, s: Union[np.ndarray, torch.Tensor]) -> torch.Tensor:
+        if self.device is not None:
+            s = torch.as_tensor(
+                s,
+                device=self.device,
+                dtype=torch.float32,
+            )
+        logits = self.basedmodel(s)
+        prior_logits = self.priormodel(s) if self.prior_std else None
+        return logits, prior_logits
+
+    def _mlp(self, input_dim, hidden_sizes, linear_layer):
+        model = [linear_layer(input_dim, hidden_sizes[0])]
+        model += [nn.ReLU(inplace=True)]
+        for i in range(1, len(hidden_sizes)):
+            model += [linear_layer(hidden_sizes[i-1], hidden_sizes[i])]
+            model += [nn.ReLU(inplace=True)]
+        model = nn.Sequential(*model)
+        return model
+
+    def _conv(self, c, h, w, hidden_size, linear_layer):
+        model = nn.Sequential(
+            nn.Conv2d(c, 32, kernel_size=8, stride=4), nn.ReLU(inplace=True),
+            nn.Conv2d(32, 64, kernel_size=4, stride=2), nn.ReLU(inplace=True),
+            nn.Conv2d(64, 64, kernel_size=3, stride=1), nn.ReLU(inplace=True),
+            nn.Flatten())
+        with torch.no_grad():
+            cnn_output_dim = int(np.prod(
+                model(torch.zeros(1, c, h, w)).shape[1:]))
+        model = nn.Sequential(
+            model,
+            linear_layer(cnn_output_dim, hidden_size), nn.ReLU(inplace=True)
+        )
+        return model
+
+
 class BaseNet(nn.Module):
     def __init__(
         self,
@@ -441,35 +508,21 @@ class BaseNet(nn.Module):
         last_layers: Optional[Tuple[Dict[str, Any], Dict[str, Any]]] = None,
     ) -> None:
         super().__init__()
-        self.device = device
         self.softmax = softmax
         self.num_atoms = num_atoms
-        self.prior_std = prior_std
         self.action_num = int(np.prod(action_shape))
         self.use_dueling = use_dueling
-        if model_type == 'mlp':
-            input_dim = int(np.prod(state_shape))
-            self.basedmodel = Fc(input_dim, hidden_sizes, device)
-            if self.prior_std:
-                self.priormodel = Fc(input_dim, hidden_sizes, device)
-                for param in self.priormodel.parameters():
-                    param.requires_grad = False
-        elif model_type == 'conv':
-            self.basedmodel = Conv(*state_shape, hidden_sizes[0], device)
-            if self.prior_std:
-                self.priormodel = Conv(*state_shape, hidden_sizes[0], device)
-                for param in self.priormodel.parameters():
-                    param.requires_grad = False
-        else:
-            raise NotImplementedError(f'not model structure: {model_type}')
+        self.feature = FeatureNet(
+            state_shape, hidden_sizes, device, model_type=model_type, prior_std=prior_std
+        )
         q_layer = last_layers[0]['last_layer']
-        self.q_input_dim = self.basedmodel.output_dim
+        self.q_input_dim = self.feature.output_dim
         self.q_output_dim = num_atoms * self.action_num
         self.Q = q_layer(self.q_input_dim, self.q_output_dim)
         if self.use_dueling:  # dueling DQN
             assert len(last_layers) > 1
             v_layer = last_layers[1]['last_layer']
-            self.v_input_dim = self.basedmodel.output_dim
+            self.v_input_dim = self.feature.output_dim
             self.v_output_dim = num_atoms
             self.V = v_layer(self.v_input_dim, self.v_output_dim)
 
@@ -507,8 +560,7 @@ class HyperNet(BaseNet):
         info: Dict[str, Any] = {},
     ) -> Tuple[torch.Tensor, Any]:
         """Mapping: s -> flatten (inside MLP)-> logits."""
-        logits = self.basedmodel(s)
-        prior_logits = self.priormodel(s) if self.prior_std else None
+        logits, prior_logits = self.feature(s)
         bsz = logits.shape[0]
         q = self.Q(logits, prior_logits, noise=noise['Q'])
         q = q.view(bsz, self.action_num, self.num_atoms).squeeze(dim=-1)
@@ -525,8 +577,7 @@ class HyperNet(BaseNet):
         info: Dict[str, Any] = {},
     ) -> Tuple[torch.Tensor, Any]:
         """Mapping: s -> flatten (inside MLP)-> logits."""
-        logits = self.basedmodel(s)
-        prior_logits = self.priormodel(s) if self.prior_std else None
+        logits, prior_logits = self.feature(s)
         bsz = logits.shape[0]
         q, v = self.Q(logits, prior_logits, noise=noise['Q']), self.V(logits, prior_logits, noise=noise['V'])
         q = q.view(bsz, self.action_num, self.num_atoms).squeeze(dim=-1)
@@ -592,8 +643,7 @@ class EnsembleNet(BaseNet):
         info: Dict[str, Any] = {},
     ) -> Tuple[torch.Tensor, Any]:
         """Mapping: s -> flatten (inside MLP)-> logits."""
-        logits = self.basedmodel(s)
-        prior_logits = self.priormodel(s) if self.prior_std else None
+        logits, prior_logits = self.feature(s)
         bsz = logits.shape[0]
         q = self.Q(logits, prior_logits, active_head=active_head)
         q = q.view(bsz, -1, self.action_num, self.num_atoms).squeeze(dim=-1).squeeze(dim=1)
@@ -610,8 +660,7 @@ class EnsembleNet(BaseNet):
         info: Dict[str, Any] = {},
     ) -> Tuple[torch.Tensor, Any]:
         """Mapping: s -> flatten (inside MLP)-> logits."""
-        logits = self.basedmodel(s)
-        prior_logits = self.priormodel(s) if self.prior_std else None
+        logits, prior_logits = self.feature(s)
         bsz = logits.shape[0]
         q, v = self.Q(logits, prior_logits, active_head=active_head), self.V(logits, prior_logits, active_head=active_head)
         q = q.view(bsz, -1, self.action_num, self.num_atoms).squeeze(dim=-1).squeeze(dim=1)
@@ -654,8 +703,7 @@ class LinearNet(BaseNet):
         info: Dict[str, Any] = {},
     ) -> Tuple[torch.Tensor, Any]:
         """Mapping: s -> flatten (inside MLP)-> logits."""
-        logits = self.basedmodel(s)
-        prior_logits = self.priormodel(s) if self.prior_std else None
+        logits, prior_logits = self.feature(s)
         bsz = logits.shape[0]
         q = self.Q(logits, prior_logits)
         q = q.view(bsz, self.action_num, self.num_atoms).squeeze(dim=-1)
@@ -671,8 +719,7 @@ class LinearNet(BaseNet):
         info: Dict[str, Any] = {},
     ) -> Tuple[torch.Tensor, Any]:
         """Mapping: s -> flatten (inside MLP)-> logits."""
-        logits = self.basedmodel(s)
-        prior_logits = self.priormodel(s) if self.prior_std else None
+        logits, prior_logits = self.feature(s)
         bsz = logits.shape[0]
         q, v = self.Q(logits, prior_logits), self.V(logits, prior_logits)
         q = q.view(bsz, self.action_num, self.num_atoms).squeeze(dim=-1)

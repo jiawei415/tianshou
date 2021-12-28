@@ -31,8 +31,8 @@ def get_args():
     # training config
     parser.add_argument('--same-noise-update', action="store_true", default=True)
     parser.add_argument('--batch-noise-update', action="store_true", default=True)
-    parser.add_argument('--target-update-freq', type=int, default=100)
-    parser.add_argument('--batch-size', type=int, default=128)
+    parser.add_argument('--target-update-freq', type=int, default=int(1e4))
+    parser.add_argument('--batch-size', type=int, default=32)
     parser.add_argument('--lr', type=float, default=0.0001)
     parser.add_argument('--weight-decay', type=float, default=0.0003125)
     parser.add_argument('--n-step', type=int, default=3)
@@ -50,17 +50,18 @@ def get_args():
     parser.add_argument('--ensemble-size', type=int, default=0)
     parser.add_argument('--hidden-layer', type=int, default=1)
     parser.add_argument('--hidden-size', type=int, default=512)
-    parser.add_argument('--use-dueling', action="store_true", default=True)
-    parser.add_argument('--init-type', type=str, default="", help="trunc_normal, xavier_uniform, xavier_normal")
+    parser.add_argument('--use-dueling', type=int, default=1)
+    parser.add_argument('--is-double', type=int, default=1)
+    parser.add_argument('--init-type', type=str, default="", choices=["", "trunc_normal", "xavier_uniform", "xavier_normal"])
     # epoch config
-    parser.add_argument('--epoch', type=int, default=1000)
-    parser.add_argument('--step-per-epoch', type=int, default=1000)
-    parser.add_argument('--step-per-collect', type=int, default=2)
+    parser.add_argument('--epoch', type=int, default=100)
+    parser.add_argument('--step-per-epoch', type=int, default=50000)
+    parser.add_argument('--step-per-collect', type=int, default=4)
     parser.add_argument('--update-per-step', type=int, default=1)
     parser.add_argument('--episode-per-test', type=int, default=10)
     # buffer confing
-    parser.add_argument('--buffer-size', type=int, default=int(2e5))
-    parser.add_argument('--min-buffer-size', type=int, default=128)
+    parser.add_argument('--buffer-size', type=int, default=int(1e6))
+    parser.add_argument('--min-buffer-size', type=int, default=int(5e4))
     parser.add_argument('--prioritized', action="store_true", default=False)
     parser.add_argument('--alpha', type=float, default=0.6)
     parser.add_argument('--beta', type=float, default=0.4)
@@ -70,7 +71,7 @@ def get_args():
     parser.add_argument('--eps-train', type=float, default=0.)
     parser.add_argument('--sample-per-step', action="store_true", default=False)
     parser.add_argument('--action-sample-num', type=int, default=1)
-    parser.add_argument('--action-select-scheme', type=str, default="Greedy", help='MAX, VIDS, Greedy')
+    parser.add_argument('--action-select-scheme', type=str, default="Greedy", choices=['MAX', 'VIDS', 'Greedy'])
     parser.add_argument('--value-gap-eps', type=float, default=1e-3)
     parser.add_argument('--value-var-eps', type=float, default=1e-3)
     # other confing
@@ -117,12 +118,13 @@ def main(args=get_args()):
         return EnsembleLinear(x, y, **last_layer_params)
 
     args.hidden_sizes = [args.hidden_size] * args.hidden_layer
+    softmax = True if args.num_atoms > 1 else False
     model_params = {
         "state_shape": args.state_shape,
         "action_shape": args.action_shape,
         "hidden_sizes": args.hidden_sizes,
         "device": args.device,
-        "softmax": True,
+        "softmax": softmax,
         "num_atoms": args.num_atoms,
         "prior_std": args.prior_std,
         "use_dueling": args.use_dueling,
@@ -141,7 +143,13 @@ def main(args=get_args()):
     elif args.init_type == "xavier_normal":
         model.apply(xavier_normal_init)
 
-    # init_model(model)
+    param_dict = {"Non-trainable": [], "Trainable": []}
+    for name, param in model.named_parameters():
+        if not param.requires_grad:
+            param_dict["Non-trainable"].append(name)
+        else:
+            param_dict["Trainable"].append(name)
+    pprint.pprint(param_dict)
     print(f"Network structure:\n{str(model)}")
     print(f"Network parameters: {sum(param.numel() for param in model.parameters())}")
 
@@ -156,6 +164,7 @@ def main(args=get_args()):
         "estimation_step": args.n_step,
         "target_update_freq": args.target_update_freq,
         "reward_normalization": args.norm_ret,
+        "is_double": args.is_double,
         "use_dueling": args.use_dueling,
         "same_noise_update": args.same_noise_update,
         "batch_noise_update": args.batch_noise_update,
@@ -203,7 +212,7 @@ def main(args=get_args()):
     # collector
     train_collector = Collector(policy, train_envs, buf, exploration_noise=False, ensemble_num=args.ensemble_num)
     test_collector = Collector(policy, test_envs, exploration_noise=False)
-    train_collector.collect(n_step=args.min_buffer_size, random=True)
+    train_collector.collect(n_step=args.min_buffer_size, random=False)
 
     # log
     log_file = f"{args.task[:-3].lower()}_{args.seed}_{time.strftime('%Y%m%d%H%M%S', time.localtime())}"

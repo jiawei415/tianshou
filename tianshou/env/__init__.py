@@ -27,11 +27,11 @@ register(
 )
 
 register(
-    id='CustomizeMDP-v1',
+    id='MDP-v1',
     entry_point='tianshou.env.customizemdp:CustomizeMDPV1',
 )
 
 register(
-    id='CustomizeMDP-v2',
+    id='MDP-v2',
     entry_point='tianshou.env.customizemdp:CustomizeMDPV2',
 )

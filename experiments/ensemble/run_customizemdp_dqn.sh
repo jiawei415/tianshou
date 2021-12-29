@@ -2,7 +2,7 @@ export CUDA_VISIBLE_DEVICES=$1
 seed=$2
 
 ## environment config
-task=CustomizeMDP-v1 # v2
+task=MDP-v1 # v2
 length=10
 final_reward=2
 ## training config

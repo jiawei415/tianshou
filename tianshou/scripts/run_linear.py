@@ -24,8 +24,8 @@ def get_args():
     parser.add_argument('--task', type=str, default='MountainCar-v0')
     parser.add_argument('--max-step', type=int, default=500)
     parser.add_argument('--size', type=int, default=20, help="only for DeepSea-v0")
-    parser.add_argument('--length', type=int, default=20, help="only for CustomizeMDP-v1/v2")
-    parser.add_argument('--final-reward', type=int, default=2, help="only for CustomizeMDP-v1/v2. If it is not 0 or 1, it means randomly generated")
+    parser.add_argument('--length', type=int, default=20, help="only for MDP-v1/v2")
+    parser.add_argument('--final-reward', type=int, default=2, help="only for MDP-v1/v2. If it is not 0 or 1, it means randomly generated")
     parser.add_argument('--seed', type=int, default=2021)
     parser.add_argument('--norm-obs', action="store_true", default=False)
     parser.add_argument('--norm-ret', action="store_true", default=False)
@@ -215,8 +215,13 @@ def main(args=get_args()):
     train_collector.collect(n_step=args.min_buffer_size, random=True)
 
     # log
-    log_file = f"{args.task[:-3].lower()}_{args.seed}_{time.strftime('%Y%m%d%H%M%S', time.localtime())}"
-    log_path = os.path.join(args.logdir, args.task, args.alg_type.lower(), log_file)
+    game_name = args.task[:-3].lower()
+    if args.task.startswith('DeepSea'):
+        game_name += f'{args.size}'
+    elif args.task.startswith('MDP'):
+        game_name += f'{args.task[-2:]}_{args.length}'
+    log_file = f"{args.alg_type}_{game_name}_{args.seed}_{time.strftime('%Y%m%d%H%M%S', time.localtime())}"
+    log_path = os.path.join(args.logdir, args.task, log_file)
     log_path = os.path.expanduser(log_path)
     os.makedirs(os.path.expanduser(log_path), exist_ok=True)
     writer = SummaryWriter(log_path)

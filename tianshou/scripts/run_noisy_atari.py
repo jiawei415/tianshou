@@ -115,13 +115,13 @@ def main(args=get_args()):
         return NewNoisyLinear(x, y, **last_layer_params)
 
     args.hidden_sizes = [args.hidden_size] * args.hidden_layer
-    softmax = True if args.num_atoms > 1 else False
+    args.softmax = True if args.num_atoms > 1 else False
     model_params = {
         "state_shape": args.state_shape,
         "action_shape": args.action_shape,
         "hidden_sizes": args.hidden_sizes,
         "device": args.device,
-        "softmax": softmax,
+        "softmax": args.softmax,
         "num_atoms": args.num_atoms,
         "prior_std": args.prior_std,
         "use_dueling": args.use_dueling,

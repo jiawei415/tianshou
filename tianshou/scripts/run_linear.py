@@ -86,7 +86,7 @@ def main(args=get_args()):
     # environment
     if args.task.startswith("DeepSea"):
         env_config = {'seed':args.seed, 'size': args.size, 'mapping_seed': args.seed}
-    elif args.task.startswith("CustomizeMDP"):
+    elif args.task.startswith("MDP"):
         env_config = {'seed':args.seed, 'length': args.length, 'final_reward': args.final_reward}
     else:
         env_config = {}
@@ -95,12 +95,12 @@ def main(args=get_args()):
     # you can also use tianshou.env.SubprocVectorEnv
     train_envs = DummyVectorEnv([make_thunk()], norm_obs=args.norm_obs)
     test_envs = DummyVectorEnv([make_thunk()], norm_obs=args.norm_obs)
-    if args.task.startswith('DeepSea') or args.task.startswith('CustomizeMDP'):
+    if args.task.startswith('DeepSea') or args.task.startswith('MDP'):
         train_action_mappling = np.array([action_mapping() for action_mapping in train_envs._get_action_mapping])
         test_action_mappling = np.array([action_mapping() for action_mapping in test_envs._get_action_mapping])
         assert (train_action_mappling == test_action_mappling).all()
         args.max_step = args.size
-    if args.task.startswith('CustomizeMDP'):
+    if args.task.startswith('MDP'):
         train_all_rewards = np.array([get_rewards() for get_rewards in train_envs._get_rewards])
         test_all_rewards = np.array([get_rewards() for get_rewards in test_envs._get_rewards])
         assert (train_all_rewards == test_all_rewards).all()
@@ -126,13 +126,13 @@ def main(args=get_args()):
         return NewLinear(x, y, **last_layer_params)
 
     args.hidden_sizes = [args.hidden_size] * args.hidden_layer
-    softmax = True if args.num_atoms > 1 else False
+    args.softmax = True if args.num_atoms > 1 else False
     model_params = {
         "state_shape": args.state_shape,
         "action_shape": args.action_shape,
         "hidden_sizes": args.hidden_sizes,
         "device": args.device,
-        "softmax": softmax,
+        "softmax": args.softmax,
         "num_atoms": args.num_atoms,
         "prior_std": args.prior_std,
         "use_dueling": args.use_dueling,

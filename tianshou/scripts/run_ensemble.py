@@ -24,8 +24,8 @@ def get_args():
     parser.add_argument('--task', type=str, default='MountainCar-v0')
     parser.add_argument('--max-step', type=int, default=500)
     parser.add_argument('--size', type=int, default=20, help="only for DeepSea-v0")
-    parser.add_argument('--length', type=int, default=20, help="only for CustomizeMDP-v1/v2")
-    parser.add_argument('--final-reward', type=int, default=2, help="only for CustomizeMDP-v1/v2. If it is not 0 or 1, it means randomly generated")
+    parser.add_argument('--length', type=int, default=20, help="only for MDP-v1/v2")
+    parser.add_argument('--final-reward', type=int, default=2, help="only for MDP-v1/v2. If it is not 0 or 1, it means randomly generated")
     parser.add_argument('--seed', type=int, default=2021)
     parser.add_argument('--norm-obs', action="store_true", default=False)
     parser.add_argument('--norm-ret', action="store_true", default=False)
@@ -96,7 +96,7 @@ def main(args=get_args()):
     # environment
     if args.task.startswith("DeepSea"):
         env_config = {'seed':args.seed, 'size': args.size, 'mapping_seed': args.seed}
-    elif args.task.startswith("CustomizeMDP"):
+    elif args.task.startswith("MDP"):
         env_config = {'seed':args.seed, 'length': args.length, 'final_reward': args.final_reward}
     else:
         env_config = {}
@@ -105,12 +105,12 @@ def main(args=get_args()):
     # you can also use tianshou.env.SubprocVectorEnv
     train_envs = DummyVectorEnv([make_thunk()], norm_obs=args.norm_obs)
     test_envs = DummyVectorEnv([make_thunk()], norm_obs=args.norm_obs)
-    if args.task.startswith('DeepSea') or args.task.startswith('CustomizeMDP'):
+    if args.task.startswith('DeepSea') or args.task.startswith('MDP'):
         train_action_mappling = np.array([action_mapping() for action_mapping in train_envs._get_action_mapping])
         test_action_mappling = np.array([action_mapping() for action_mapping in test_envs._get_action_mapping])
         assert (train_action_mappling == test_action_mappling).all()
         args.max_step = args.size
-    if args.task.startswith('CustomizeMDP'):
+    if args.task.startswith('MDP'):
         train_all_rewards = np.array([get_rewards() for get_rewards in train_envs._get_rewards])
         test_all_rewards = np.array([get_rewards() for get_rewards in test_envs._get_rewards])
         assert (train_all_rewards == test_all_rewards).all()
@@ -139,13 +139,13 @@ def main(args=get_args()):
         return EnsembleLinear(x, y, **last_layer_params)
 
     args.hidden_sizes = [args.hidden_size] * args.hidden_layer
-    softmax = True if args.num_atoms > 1 else False
+    args.softmax = True if args.num_atoms > 1 else False
     model_params = {
         "state_shape": args.state_shape,
         "action_shape": args.action_shape,
         "hidden_sizes": args.hidden_sizes,
         "device": args.device,
-        "softmax": softmax,
+        "softmax": args.softmax,
         "num_atoms": args.num_atoms,
         "prior_std": args.prior_std,
         "use_dueling": args.use_dueling,

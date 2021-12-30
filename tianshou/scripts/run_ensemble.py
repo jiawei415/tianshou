@@ -191,6 +191,8 @@ def main(args=get_args()):
         "sample_per_step": args.sample_per_step,
         "action_sample_num": args.action_sample_num,
         "action_select_scheme": args.action_select_scheme,
+        "value_gap_eps": args.value_gap_eps,
+        "value_var_eps": args.value_var_eps,
         "ensemble_num": args.ensemble_num,
     }
     if args.num_atoms > 1:

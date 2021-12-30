@@ -74,7 +74,7 @@ time=2
 for i in $(seq 5)
 do
     tag=$(date "+%Y%m%d%H%M%S")
-    python -m tianshou.scripts.run_${alg_type} --seed ${seed} --task ${task} \
+    python -m tianshou.scripts.run_${alg_type}_atari --seed ${seed} --task ${task} \
     --target-update-freq=${target_update_freq} --batch-size=${batch_size} --lr=${lr} \
     --weight-decay=${weight_decay} --n-step=${n_step} --v-max=${v_max} --num-atoms=${num_atoms} \
     --noise-std=${noise_std} --noise-dim=${noise_dim} --noise-norm=${noise_norm} \

@@ -200,6 +200,8 @@ def main(args=get_args()):
         "sample_per_step": args.sample_per_step,
         "action_sample_num": args.action_sample_num,
         "action_select_scheme": args.action_select_scheme,
+        "value_gap_eps": args.value_gap_eps,
+        "value_var_eps": args.value_var_eps,
         "noise_std": args.noise_std,
         "noise_dim": args.noise_dim,
         "noise_norm":args.noise_norm,

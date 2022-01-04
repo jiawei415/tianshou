@@ -209,7 +209,9 @@ def main(args=get_args()):
             weight_norm=True
         )
     else:
-        buf = VectorReplayBuffer(args.buffer_size, buffer_num=len(train_envs))
+        buf = VectorReplayBuffer(args.buffer_size, buffer_num=len(train_envs),
+            ignore_obs_next=True,
+            save_only_last_obs=True, stack_num=args.frames_stack)
 
     # collector
     train_collector = Collector(policy, train_envs, buf, exploration_noise=False, ensemble_num=args.ensemble_num)

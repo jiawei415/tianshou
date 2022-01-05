@@ -13,6 +13,7 @@ weight_decay=0
 n_step=3
 v_max=100
 num_atoms=51
+num_quantiles=1
 ## algorithm config
 alg_type=hyper
 noise_std=1
@@ -77,7 +78,7 @@ do
     tag=$(date "+%Y%m%d%H%M%S")
     python -m tianshou.scripts.run_${alg_type}_atari --seed ${seed} --task ${task} \
     --target-update-freq=${target_update_freq} --batch-size=${batch_size} --lr=${lr} \
-    --weight-decay=${weight_decay} --n-step=${n_step} --v-max=${v_max} --num-atoms=${num_atoms} \
+    --weight-decay=${weight_decay} --n-step=${n_step} --v-max=${v_max} --num-atoms=${num_atoms} --num-quantiles=${num_quantiles} \
     --noise-std=${noise_std} --noise-dim=${noise_dim} --noise-norm=${noise_norm} \
     --target-noise-std=${target_noise_std} --hyper-reg-coef=${hyper_reg_coef} --hyper-weight-decay=${hyper_weight_decay} \
     --prior-std=${prior_std} --prior-scale=${prior_scale} --posterior-scale=${posterior_scale} \

@@ -13,7 +13,7 @@ weight_decay=0
 n_step=3
 v_max=0
 num_atoms=1
-num_quantiles=1
+num_quantiles=200
 ## algorithm config
 alg_type=hyper
 noise_std=1

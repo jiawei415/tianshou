@@ -6,6 +6,7 @@ seed=$3
 
 v_max=0
 num_atoms=1
+num_quantiles=1
 ## action selection config
 sample_per_step=False
 action_sample_num=1
@@ -15,7 +16,7 @@ value_var_eps=0.001
 
 task="${task}NoFrameskip-v4"
 config="{
-    'same_noise_update':True,'batch_noise_update':True,'target_update_freq':10000,'batch_size':320,'lr':0.0001,'weight_decay':0,'n_step':3,'v_max':${v_max},'num_atoms':${num_atoms}, \
+    'same_noise_update':True,'batch_noise_update':True,'target_update_freq':10000,'batch_size':320,'lr':0.0001,'weight_decay':0,'n_step':3,'v_max':${v_max},'num_atoms':${num_atoms}, 'num_quantiles':${num_quantiles}\
     'noise_std':1,'noise_dim':32,'noise_norm':0,'target_noise_std':0,'hyper_reg_coef':0.01,'hyper_weight_decay':0,'prior_std':1,'prior_scale':0.1,'posterior_scale':0.1, \
     'sample_per_step':${sample_per_step},'action_sample_num':${action_sample_num},'action_select_scheme':'${action_select_scheme}','value_gap_eps':${value_gap_eps},'value_var_eps':${value_var_eps}, \
     'hidden_layer':1,'hidden_size':512,'use_dueling':True,'use_dueling':1,'is_double':1,'init_type':'', \

@@ -11,7 +11,7 @@ from torch.utils.tensorboard import SummaryWriter
 from tianshou.data import Collector, PrioritizedVectorReplayBuffer, VectorReplayBuffer
 from tianshou.env import DummyVectorEnv
 from tianshou.env.utils import make_env
-from tianshou.policy import  HyperDQNPolicy, HyperC51Policy
+from tianshou.policy import  HyperDQNPolicy, HyperC51Policy, HyperQRDQNPolicy
 from tianshou.trainer import offpolicy_trainer
 from tianshou.utils import TensorboardLogger, import_module_or_data, read_config_dict
 from tianshou.utils.net.common import HyperNet, trunc_normal_init, xavier_normal_init, xavier_uniform_init
@@ -38,8 +38,9 @@ def get_args():
     parser.add_argument('--weight-decay', type=float, default=0.0003125)
     parser.add_argument('--n-step', type=int, default=3)
     parser.add_argument('--gamma', type=float, default=0.99)
-    parser.add_argument('--v-max', type=float, default=100.)
-    parser.add_argument('--num-atoms', type=int, default=51)
+    parser.add_argument('--v-max', type=float, default=0.)
+    parser.add_argument('--num-atoms', type=int, default=1)
+    parser.add_argument('--num-quantiles', type=int, default=1)
     # algorithm config
     parser.add_argument('--alg-type', type=str, default="hyper")
     parser.add_argument('--noise-norm', type=int, default=0, choices=[0, 1])
@@ -129,6 +130,10 @@ def main(args=get_args()):
     test_envs.seed(args.seed)
 
     # model
+    if args.num_atoms > 1:
+        assert args.num_quantiles == 1
+    if args.num_quantiles > 1:
+        assert args.num_atoms == 1
     last_layer_params = {
         'device': args.device,
         'noise_dim': args.noise_dim,
@@ -148,7 +153,7 @@ def main(args=get_args()):
         "hidden_sizes": args.hidden_sizes,
         "device": args.device,
         "softmax": args.softmax,
-        "num_atoms": args.num_atoms,
+        "num_atoms": args.num_atoms * args.num_quantiles,
         "prior_std": args.prior_std,
         "use_dueling": args.use_dueling,
     }
@@ -211,6 +216,9 @@ def main(args=get_args()):
     if args.num_atoms > 1:
         policy_params.update({'num_atoms': args.num_atoms, 'v_max': args.v_max, 'v_min': -args.v_max})
         policy = HyperC51Policy(**policy_params).to(args.device)
+    elif args.num_quantiles > 1:
+        policy_params.update({'num_quantiles': args.num_quantiles})
+        policy = HyperQRDQNPolicy(**policy_params).to(args.device)
     else:
         policy = HyperDQNPolicy(**policy_params).to(args.device)
 

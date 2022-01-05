@@ -219,7 +219,7 @@ def main(args=get_args()):
     train_collector.collect(n_step=args.min_buffer_size, random=False)
 
     # log
-    game_name = args.task[:-3].lower()
+    game_name = args.task[:args.task.find('No')].lower()
     log_file = f"{args.alg_type}_{game_name}_{args.seed}_{time.strftime('%Y%m%d%H%M%S', time.localtime())}"
     log_path = os.path.join(args.logdir, args.task, log_file)
     log_path = os.path.expanduser(log_path)

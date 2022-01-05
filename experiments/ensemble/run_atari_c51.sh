@@ -62,9 +62,9 @@ config08="{'prior_std':0,'sample_per_step':True,'same_noise_update':False}"
 config="${config01}"
 
 if [ -z "$task" ]; then
-  task="PongNoFrameskip-v4"
+  task="Pong"
 fi
-
+task="${task}NoFrameskip-v4"
 
 time=2
 for i in $(seq 5)

@@ -25,7 +25,7 @@ from tianshou.policy.imitation.discrete_cql import DiscreteCQLPolicy
 from tianshou.policy.imitation.discrete_crr import DiscreteCRRPolicy
 from tianshou.policy.modelbased.psrl import PSRLPolicy
 from tianshou.policy.multiagent.mapolicy import MultiAgentPolicyManager
-from tianshou.policy.modelfree.hyper import HyperDQNPolicy, HyperC51Policy
+from tianshou.policy.modelfree.hyper import HyperDQNPolicy, HyperC51Policy, HyperQRDQNPolicy
 from tianshou.policy.modelfree.noisy import NoisyDQNPolicy, NoisyC51Policy
 from tianshou.policy.modelfree.ensemble import EnsembleDQNPolicy, EnsembleC51Policy
 
@@ -58,6 +58,7 @@ __all__ = [
     "MultiAgentPolicyManager",
     "HyperDQNPolicy",
     "HyperC51Policy",
+    "HyperQRDQNPolicy",
     "NoisyDQNPolicy",
     "NoisyC51Policy",
     "EnsembleDQNPolicy",

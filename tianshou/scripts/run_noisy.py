@@ -72,7 +72,7 @@ def get_args():
     parser.add_argument('--action-sample-num', type=int, default=1)
     parser.add_argument('--action-select-scheme', type=str, default="Greedy", choices=['MAX', 'VIDS', 'Greedy'])
     parser.add_argument('--value-gap-eps', type=float, default=1e-3)
-    parser.add_argument('--value-var-eps', type=float, default=1e-3)
+    parser.add_argument('--value-var-eps', type=float, default=1e-7)
     # other confing
     parser.add_argument('--save-interval', type=int, default=4)
     parser.add_argument('--save-buffer', action="store_true", default=False)

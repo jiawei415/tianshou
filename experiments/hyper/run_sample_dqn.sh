@@ -34,7 +34,7 @@ sample_per_step=False
 action_sample_num=1
 action_select_scheme=Greedy
 value_gap_eps=0.001
-value_var_eps=0.001
+value_var_eps=0.0000001
 ## network config
 hidden_layer=2
 hidden_size=64

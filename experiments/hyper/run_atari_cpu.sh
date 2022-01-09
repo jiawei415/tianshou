@@ -45,7 +45,7 @@ if [ "$cmd" = 'run' ]; then
     --target-update-freq=10000 --batch-size=320 --lr=0.0001 --weight-decay=0 --n-step=3 --v-max=0 --num-atoms=1 --num-quantiles=1 \
     --noise-std=1 --noise-dim=32 --noise-norm=0 --target-noise-std=0.01 --hyper-reg-coef=0.01 --hyper-weight-decay=0 \
     --prior-std=1 --prior-scale=0.1 --posterior-scale=0.1 \
-    --action-sample-num=1 --action-select-scheme='Greedy' --value-gap-eps=0.001 --value-var-eps=0.001 \
+    --action-sample-num=1 --action-select-scheme='Greedy' --value-gap-eps=0.001 --value-var-eps=0.0000001 \
     --hidden-layer=1 --hidden-size=512 --use-dueling=0 --is_double=1 --init-type='' \
     --epoch=100 -step-per-epoch=50000 --step-per-collect=4 --buffer-size=1000000 --min-buffer-size=50000 \
     --config "$config" --logdir '/data/jiawei/Code/tianshou/results' > log.out 2> log.err &

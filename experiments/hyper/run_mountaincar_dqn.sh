@@ -35,7 +35,7 @@ value_var_eps=0.001
 ## network config
 hidden_layer=2
 hidden_size=64
-use_dueling=1
+use_dueling=0
 is_double=1
 init_type=""
 ## epoch config

@@ -35,7 +35,7 @@ value_var_eps=0.001
 hidden_layer=1
 hidden_size=512
 use_dueling=True
-use_dueling=1
+use_dueling=0
 is_double=1
 init_type=''
 ## epoch config

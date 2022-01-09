@@ -37,7 +37,7 @@ value_var_eps=0.001
 hidden_layer=2
 hidden_size=64
 use_dueling=1
-is_double=1
+use_dueling=0
 init_type=trunc_normal
 ## epoch config
 epoch=1000

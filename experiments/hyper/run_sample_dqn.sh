@@ -1,9 +1,12 @@
-export CUDA_VISIBLE_DEVICES=$1
-seed=$2
+export CUDA_VISIBLE_DEVICES=$2
+seed=$3
 
 ## environment config
-task=DeepSea-v0
-size=20
+task=$1
+size=20 # for DeepSea-v0
+max_step=500 # for Mountaincar-v0
+length=20 # for MDP-v1/v2
+final_reward=2 # for MDP-v1
 ## training config
 same_noise_update=True
 batch_noise_update=True
@@ -12,8 +15,8 @@ batch_size=128
 lr=0.001
 weight_decay=0
 n_step=1
-v_max=1
-num_atoms=51
+v_max=0
+num_atoms=1
 num_quantiles=1
 ## algorithm config
 alg_type=hyper
@@ -35,7 +38,7 @@ value_var_eps=0.001
 ## network config
 hidden_layer=2
 hidden_size=64
-use_dueling=0
+use_dueling=1
 is_double=1
 init_type=trunc_normal
 ## epoch config
@@ -65,11 +68,15 @@ config08="{'prior_std':0,'sample_per_step':True,'same_noise_update':False}"
 
 config="${config01}"
 
+if [ -z "$task" ]; then
+  task="DeepSea-v0"
+fi
+
 time=2
 for i in $(seq 5)
 do
     tag=$(date "+%Y%m%d%H%M%S")
-    python -m tianshou.scripts.run_${alg_type} --seed ${seed} --task ${task} --size ${size} \
+    python -m tianshou.scripts.run_${alg_type} --seed ${seed} --task ${task} --size ${size} --max-step ${max_step} --length ${length} --final-reward ${final_reward} \
     --target-update-freq=${target_update_freq} --batch-size=${batch_size} --lr=${lr} \
     --weight-decay=${weight_decay} --n-step=${n_step} --v-max=${v_max} --num-atoms=${num_atoms} --num-quantiles=${num_quantiles} \
     --noise-std=${noise_std} --noise-dim=${noise_dim} --noise-norm=${noise_norm} \

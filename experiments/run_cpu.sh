@@ -36,6 +36,5 @@ if [ "$cmd" = 'run' ]; then
     conda activate torch
     
     python /data/jiawei/Code/tianshou/tianshou/scripts/run_${alg}.py --task $task --config $config --logdir '/data/jiawei/Code/tianshou/results' > log.out 2> log.err &
-    # python /data/jiawei/Code/tianshou/other.py --task $task --config $config > log.out 2> log.err &
     # echo "run $task"
 fi

@@ -347,6 +347,6 @@ class ReplayBuffer:
             obs_next=obs_next,
             info=self.get(indices, "info", Batch()),
             policy=self.get(indices, "policy", Batch()),
-            ensemble_mask=self.get(indices, "ensemble_mask", Batch()),
-            target_noise=self.get(indices, "target_noise", Batch()),
+            ensemble_mask=self.ensemble_mask[indices] if isinstance(self.ensemble_mask, np.ndarray) else Batch(),
+            target_noise=self.target_noise[indices] if isinstance(self.target_noise, np.ndarray) else Batch(),
         )

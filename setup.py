@@ -2,7 +2,6 @@
 # -*- coding: utf-8 -*-
 
 import os
-import numpy as np
 
 from setuptools import find_packages, setup
 
